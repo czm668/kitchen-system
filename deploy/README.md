@@ -76,8 +76,10 @@ compose 场景下 db_url 优先，SQLite 文件不再被写。
 - 运行时写库只覆盖 `sensor_readings`（遥测帧）与 `alarm_events`（告警事件）
   **2 张表**；其余 48 张是 DDL 空表，订单/菜品/人员等业务状态仍是内存态
   （A1 设计如此，「业务写路径第二轮」从未实施，不是接线漏了）。
-- 备份侧车 `backup-sidecar.sh` 只归档 `api_var` 卷，**MySQL 数据在
-  `mysql_data` 卷里，目前没被备份**；mysqldump 逻辑备份仍未接入。
+- 备份侧车 `backup-sidecar.sh` 每天 02:00 同时做 **mysqldump（kitchen 库，
+  `--single-transaction` 一致性快照）与 `api_var` 卷 tar 归档**，14 天滚动
+  （A19 已接入，恢复演练实测通过；见 §三）。⚠️ 其余 48 张空表只在 dump 里有
+  DDL，没数据可备。
 - 生产化（nginx / HTTPS / 浏览器实机点检）仍按 A10，架构文档 §7 明确不在范围。
 
 ### 反向代理与 HTTPS（两路径通用）
@@ -123,19 +125,33 @@ python tools/backup.py --db var/runtime.db --keep 14
 # 3) 起服务；GET /api/admin/db/stats 核对表行数与备份前一致
 ```
 
-**compose 备份侧车**（11/15 实测）：`deploy/backup-sidecar.sh` 以 `:ro`
-挂进容器，每天 02:00（容器 UTC，约合北京时间 10:00）把 `api_var` 卷
-打成 `/dest/api_var_YYYYMMDD.tar.gz` 并删 14 天前的旧包。
-**只归档卷，不做 mysqldump**；MySQL 逻辑备份未接入，属未实施项，
-答辩别把侧车说成"数据库备份已闭环"。手动验证归档链路：
+**compose 备份侧车**（11/15 A19 更新）：`deploy/backup-sidecar.sh` 以 `:ro`
+挂进容器，镜像用 `mysql:8.4`（与 mysql 服务同镜像，自带 mysqldump，零新增
+下载）。每天 02:00（容器 UTC，约合北京时间 10:00）做两件事，产物落
+`api_backups` 卷、14 天滚动：
+
+1. `mysqldump -h mysql -ukitchen --single-transaction kitchen` →
+   `/dest/mysql_YYYYMMDD.sql.gz`（一致性快照，不锁表；kitchen 账号只有
+   kitchen 库权限，不碰 root）
+2. `tar` 打包 `api_var` 卷 → `/dest/api_var_YYYYMMDD.tar.gz`
+
+**恢复（mysqldump 路径，A19 已实测演练）**：
 
 ```bash
-docker exec kitchen-backup sh -c 'tar czf /dest/probe.tar.gz -C /source var'
-# 实测产出 617K 的 tar 包；验证完删掉 probe 文件
+# 1) 停写入：docker compose stop api
+# 2) 灌回：zcat /dest/mysql_YYYYMMDD.sql.gz | mysql -h 127.0.0.1 -uroot -p kitchen
+#    （或先灌进临时库核对行数，再择机切换）
+# 3) 起服务；GET /api/admin/db/stats 核对 backend=mysql 与表行数
 ```
 
-恢复验证已实测：备份包解出的快照可正常打开查询（sensor_readings /
-alarm_events 行数与备份前一致）。
+> 演练记录（2026-11-15）：probe dump 灌入临时库 `kitchen_restore_probe`，
+> 50 表 / sensor_readings 13020 行 / alarm_events 5011 行与源库时点快照
+> 一致，核对后临时库已删。注意 `kitchen` 账号无建库权限，整库恢复用 root。
+
+**api_var 卷恢复**：解 tar 包，把 `var/` 覆盖回卷（审计 `audit.jsonl`、
+队列 `queue.jsonl`）。2026-11-15 A17 遗留的 15MB 旧 `runtime.db` 已归档
+（`_backup_20261115/runtime-db-a17-archive.db`）并从卷内删除——api 自 A18
+起走 MySQL，不再读写该文件。
 
 ## 四、常见坑
 

@@ -56,11 +56,18 @@ services:
       retries: 10
     restart: unless-stopped
 
-  # 备份侧车：每天 02:00 打包 api_var 卷（14 天滚动）。
-  # 简化口径：只做卷归档；MySQL 逻辑备份（mysqldump）未接入，见脚本头注释。
+  # 备份侧车：每天 02:00 mysqldump kitchen 库 + tar 打包 api_var 卷（14 天滚动）。
+  # 镜像用 mysql:8.4：与 mysql 服务同镜像、自带 mysqldump，零新增下载。
+  # 2026-11-15 A19：接入 mysqldump，MySQL 数据此前不在备份范围（见脚本头注释）。
   backup:
-    image: python:3.11-slim
+    image: mysql:8.4
     container_name: kitchen-backup
+    environment:
+      # kitchen 账号只有 kitchen 库权限，mysqldump 用它，不用 root
+      MYSQL_PASSWORD: "${MYSQL_PASSWORD:?请设置 MySQL 口令}"
+    depends_on:
+      mysql:
+        condition: service_healthy
     volumes:
       - api_var:/source/var:ro
       - api_backups:/dest
