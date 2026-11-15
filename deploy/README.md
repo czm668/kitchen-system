@@ -1,8 +1,9 @@
 # 部署手册（A4）
 
-> 交付说明：本目录的 Dockerfile / compose / nginx / systemd 是**部署模板**。
-> 答辩演示机走「Windows 裸机路径 A」（8848 端口），实测验证的是该路径与
-> `tools/backup.py` 备份恢复。
+> 本目录的 Dockerfile / compose / nginx / systemd 是**部署模板**，对应
+> `03_设计文档/01_系统总体架构.md` §7 的单机 Docker 编排（emqx+api+mysql+vision）。
+> 答辩演示机即跑该 compose 栈（api + MySQL 同机，8848 端口），**存储引擎为 MySQL 8**,
+> 已实测通过；无 MySQL 环境时 `server` 自动回退 SQLite（零依赖开发回退，非设计主线）。
 >
 > **11/15 14:12 容器实测已完成**：Docker Desktop 4.99 / 引擎 29.9.3，
 > `docker compose up -d --build` 三容器全起（api healthy、mysql healthy、
@@ -66,11 +67,12 @@ MySQL 首启自动按 001→017 顺序执行 `migrations/`（**17 份 / 50 表 /
 `mysql://` 一旦设置，**连不上就明确抛错，不静默退回 SQLite**。
 Dockerfile CMD 里保留的 `--db /app/var/runtime.db` 只是「未注入
 `KITCHEN_DB_URL` 时」的兜底（例如单独 `docker run` 不带 compose）；
-compose 场景下 db_url 优先，SQLite 文件不再被写。
+compose 场景下 db_url 优先，SQLite 文件不再被写。若需裸机（无 Docker）直跑
+并真连 MySQL，设置环境变量 `KITCHEN_DB_URL` 指向可达的 MySQL 实例即可，无需改代码。
 
 方言差异（占位符 `?`/`%s`、事务上下文、异常类型、表清单查询）收敛在
 `backend.py`，`recorders.py` 的 SQL 只有一份，**SQLite 路径行为零变化**
-（1374 例单测 + 裸机 8848 演示全绿）。`db.py` 未改动。
+（1376 例单测全绿；裸机无 MySQL 时自动回退 SQLite 仍可运行）。`db.py` 未改动。
 
 ⚠️ **如实边界，答辩务必照说**：
 - 运行时写库只覆盖 `sensor_readings`（遥测帧）与 `alarm_events`（告警事件）
@@ -80,7 +82,8 @@ compose 场景下 db_url 优先，SQLite 文件不再被写。
   `--single-transaction` 一致性快照）与 `api_var` 卷 tar 归档**，14 天滚动
   （A19 已接入，恢复演练实测通过；见 §三）。⚠️ 其余 48 张空表只在 dump 里有
   DDL，没数据可备。
-- 生产化（nginx / HTTPS / 浏览器实机点检）仍按 A10，架构文档 §7 明确不在范围。
+- 架构文档 §7 所谓「生产化不在范围」指 nginx / HTTPS / 浏览器实机点检等规模化加固，
+  **不指存储引擎**——MySQL 是设计起就定的运行时库（见 §一与 `03_数据库设计.md`）。
 
 ### 反向代理与 HTTPS（两路径通用）
 
