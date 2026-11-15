@@ -1,9 +1,12 @@
 # 部署手册（A4）
 
-> 交付说明：本目录的 Dockerfile / compose / nginx / systemd 是**部署模板**，
-> 开发机（Windows，无 Docker）上实测验证的是「裸机 Windows 路径」与
-> `tools/backup.py` 备份恢复；Linux/Docker 路径首次在有对应环境的机器上
-> 执行时，按报错微调即可（预期差异集中在路径分隔符与文件权限）。
+> 交付说明：本目录的 Dockerfile / compose / nginx / systemd 是**部署模板**。
+> 答辩演示机走「Windows 裸机路径 A」（8848 端口），实测验证的是该路径与
+> `tools/backup.py` 备份恢复。开发机 11/15 已装 Docker Desktop 4.99、引擎
+> 验证通过，但**容器实测未完成**（国内直连 Docker Hub 拉镜像超时，见
+> `E:\docker-setup\INSTALL-GUIDE.md` 六-bis 与本文件 §四第 4 条）；Docker
+> 路径首次在能拉到镜像的机器上执行时，按报错微调即可（预期差异集中在
+> 路径分隔符与文件权限）。
 
 ## 一、两条部署路径
 
@@ -37,23 +40,24 @@ sudo systemctl enable --now kitchen-api
 journalctl -u kitchen-api -f    # 看日志
 ```
 
-**Docker Compose**（含 MySQL 42 表部署路径）：
+**Docker Compose**（含 MySQL 50 表部署路径）：
 
 ```bash
 cd deploy
-cat > .env <<'EOF'
-KITCHEN_ADMIN_PASSWORD=<强口令>
-KITCHEN_API_SECRET=<32+位随机串>
-MYSQL_PASSWORD=<强口令>
-MYSQL_ROOT_PASSWORD=<强口令>
-EOF
-docker compose up -d
+cp .env.example .env        # Windows PowerShell：Copy-Item .env.example .env
+# 编辑 .env，把 4 个 CHANGE_ME 全改掉（随机串生成命令在模板注释里）
+docker compose config       # 先校验变量，不启容器
+docker compose up -d --build
 ```
 
-MySQL 首启自动按 001→014 顺序执行 `migrations/`（42 表/63 索引）。
-当前 app 容器仍用 SQLite 运行时库；接 MySQL 只需在 `storage/db.py` 换
-连接串——schema 与 MySQL DDL 逐列一致（migrate.py 双向翻译已验证），
-这是 A1 的设计预留。
+`.env` 已被 `.gitignore` 排除，真实口令不要提交进版本库。
+
+MySQL 首启自动按 001→017 顺序执行 `migrations/`（**17 份 / 50 表 / 71 索引**）。
+⚠️ **当前 app 容器仍用 SQLite 运行时库**：compose 传的 `KITCHEN_DB_URL`
+**没有任何代码消费**（Dockerfile 的 CMD 写死 `--db /app/var/runtime.db`），
+MySQL 容器是空跑，数据进 `api_var` 卷。接 MySQL 需在 `storage/db.py` 换
+连接串——schema 与 MySQL DDL 逐列一致（`migrate.py` 双向翻译已验证），
+这是 A1 的设计预留，属**架构改动，尚未实施**。答辩口径务必照实说。
 
 ### 反向代理与 HTTPS（两路径通用）
 
@@ -105,14 +109,20 @@ alarm_events 行数与备份前一致）。
 
 1. **SSE 每 60s 断连**：nginx 没配 `/api/events` 的 `proxy_buffering off` +
    放长 `proxy_read_timeout`（模板里已配好，别删）。
-2. **compose 起来 API 一直重启**：`.env` 三个口令变量没设——compose 用
-   `:?` 语法强制报错，这是故意的。
+2. **compose 起来 API 一直重启**：`.env` 四个口令变量没设（模板见
+   `deploy/.env.example`）——compose 用 `:?` 语法强制报错，这是故意的。
+   先跑 `docker compose config` 校验，比 `up` 起来再排查快得多。
 3. **MySQL 首启没建表**：`migrations/` 只在**数据卷为空的首启**执行；
    卷里有旧数据时改用 `docker exec -i kitchen-mysql mysql -ukitchen -p
-   kitchen < migrations/0XX_xxx.sql` 手动补。
-4. **systemd 起不来**：`kitchen.env` 权限必须是 600 且属主 root（否则
+   kitchen < migrations/0XX_xxx.sql` 手动补（或清空 `mysql_data` 卷重建）。
+   当前共 17 份（001→017），逐份补时按文件名序。
+4. **国内拉镜像超时**：`python:3.11-slim` / `mysql:8.4` 从 Docker Hub
+   拉取，直连超时报 `registry-1.docker.io:443` 连接失败。在 Docker Desktop
+   → Settings → Docker Engine 配 `registry-mirrors`，或 Resources → Proxies
+   填 HTTPS 代理，然后 Apply & Restart。与代码无关，引擎本身已正常。
+5. **systemd 起不来**：`kitchen.env` 权限必须是 600 且属主 root（否则
    systemd 拒读），`ProtectSystem=strict` 下只有 var/backups 可写，
    代码目录改文件会被拒。
-5. **Windows 上 `python -m kitchen.api.server` 找不到模块**：便携解释器
+6. **Windows 上 `python -m kitchen.api.server` 找不到模块**：便携解释器
    是 `._pth` 模式，`-m` 不吃 PYTHONPATH——用仓库根的 pytest 配置跑，或
    `cd 02_项目代码/kitchen/src && python -m kitchen.api.server ...`。

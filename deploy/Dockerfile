@@ -2,9 +2,11 @@
 # 构建：docker build -t kitchen-api deploy/
 # 运行：docker compose up -d（见 docker-compose.yml，含 MySQL）
 #
-# 注意：本仓库开发环境（Windows + 便携 Python）未装 Docker，本文件按
-# 标准 python:3.11-slim 路径编写，首次在有 Docker 的机器上构建时如有
-# 平台差异按报错微调即可（预期问题集中在文件权限与路径分隔符）。
+# 注意：开发机为 Windows + 便携 Python；Docker Desktop 4.99 于 11/15 装好、
+# 引擎已验证（29.9.3/overlayfs），但容器实测尚未完成（国内拉 Docker Hub
+# 镜像超时，见 deploy/README.md §四第 4 条）。本文件按标准 python:3.11-slim
+# 路径编写，首次在有 Docker 的机器上构建时如有平台差异按报错微调即可
+# （预期问题集中在文件权限与路径分隔符）。
 
 FROM python:3.11-slim AS base
 

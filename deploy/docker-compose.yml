@@ -1,6 +1,6 @@
 # 后厨管理系统 - Docker Compose（A4）
 # 用法：docker compose up -d ；日志：docker compose logs -f api
-# MySQL 部署路径：migrations/001-014 在 mysql 服务首次启动时自动执行
+# MySQL 部署路径：migrations/001-017 在 mysql 服务首次启动时自动执行
 # （./migrations 挂到 /docker-entrypoint-initdb.d，MySQL 官方镜像首启自动跑 .sql）。
 #
 # ⚠️ 上生产前必须改的三个值（.env 或直接改这里）：
@@ -18,8 +18,11 @@ services:
       # —— prod 安全（A5 基础）：账号口令只给 PBKDF2 摘要，见 accounts.py
       KITCHEN_ADMIN_PASSWORD: "${KITCHEN_ADMIN_PASSWORD:?请设置管理口令}"
       KITCHEN_API_SECRET: "${KITCHEN_API_SECRET:?请设置 API 签名密钥}"
-      # —— MySQL 连接（当前 app 用 SQLite 运行时库；接 MySQL 需在 storage 层
-      #    换连接串，schema 与 migrations/ 逐列一致，见 deploy/README.md）
+      # —— MySQL 连接【预留，当前无代码消费】
+      #    Dockerfile 的 CMD 写死 `--db /app/var/runtime.db`，storage 层只支持
+      #    SQLite；下面这个变量目前没有任何代码读取，MySQL 容器因此是空跑。
+      #    接 MySQL 需先在 storage/db.py 换连接串（schema 与 migrations/ 逐列
+      #    一致，见 deploy/README.md §一），属架构改动，答辩口径务必如实说明。
       KITCHEN_DB_URL: "mysql://kitchen:${MYSQL_PASSWORD}@mysql:3306/kitchen"
     volumes:
       - api_var:/app/var          # 队列/审计/运行时库持久化
@@ -39,7 +42,8 @@ services:
       MYSQL_ROOT_PASSWORD: "${MYSQL_ROOT_PASSWORD:?请设置 root 口令}"
     volumes:
       - mysql_data:/var/lib/mysql
-      # 42 张表 / 63 索引：首启自动执行（按文件名序 001→014）
+      # 17 份迁移 / 50 表 / 71 索引：首启自动执行（按文件名序 001→017）
+      # 仅在 mysql_data 卷为空时执行；有旧数据时见 deploy/README.md §四第 3 条
       - ../migrations:/docker-entrypoint-initdb.d:ro
     command: >
       --character-set-server=utf8mb4
