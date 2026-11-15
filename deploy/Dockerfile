@@ -34,9 +34,10 @@ ENV PYTHONUNBUFFERED=1 \
 
 EXPOSE 8848
 
-# 健康检查：真发一次 HTTP（管理端 meta 接口，无需登录）
+# 健康检查：真发一次 HTTP。必须用 /api/health（anonymous=True，免鉴权），
+# 不能用 /api/meta——后者需登录，无 token 返回 401，会让容器永远 unhealthy。
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
-    CMD python -c "import urllib.request,os; urllib.request.urlopen(f'http://127.0.0.1:{os.environ.get(\"KITCHEN_PORT\",\"8848\")}/api/meta', timeout=4)" || exit 1
+    CMD python -c "import urllib.request,os; urllib.request.urlopen(f'http://127.0.0.1:{os.environ.get(\"KITCHEN_PORT\",\"8848\")}/api/health', timeout=4)" || exit 1
 
 # 生产入口：--db 落库（容器内 SQLite；MySQL 部署见 compose 的 mysql 服务）
 # 密钥/口令经环境变量注入（KITCHEN_ADMIN_PASSWORD / KITCHEN_API_SECRET）
