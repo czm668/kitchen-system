@@ -1,0 +1,11 @@
+# Windows 开发机上 core.autocrlf=true，会把 sh 脚本 checkout 成 CRLF；
+# 挂进 Linux 容器后 `sh /backup-sidecar.sh` 会报 `\r: not found`。
+# 强制 shell 脚本在索引与工作树都用 LF（2026-11-15 A17）。
+.gitattributes text eol=lf
+*.sh text eol=lf
+
+# 同理：compose / Dockerfile / nginx.conf 被 Linux daemon 解析，统一 LF。
+Dockerfile text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+*.conf text eol=lf
