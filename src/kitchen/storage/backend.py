@@ -35,8 +35,6 @@ log = logging.getLogger("kitchen.storage.backend")
 __all__ = ["RuntimeDB", "open_runtime", "parse_mysql_url", "mask_url"]
 
 _MYSQL_SCHEMES = ("mysql", "mysql+pymysql")
-# 与 tools/migrate.py 的 IDEMPOTENT_ERRNOS 同口径：DDL 重跑时的幂等错误
-_IDEMPOTENT_ERRNOS = frozenset({1050, 1060, 1061, 1091, 1826})
 
 
 def parse_mysql_url(url: str) -> dict[str, Any]:
@@ -91,11 +89,6 @@ def mask_url(url: str) -> str:
     )
 
 
-def _mysql_errno(exc: BaseException) -> int | None:
-    args = getattr(exc, "args", ())
-    return args[0] if args and isinstance(args[0], int) else None
-
-
 class RuntimeDB:
     """统一 DB-API 门面。`recorders.py` 只依赖这里的方法，不碰底层连接。"""
 
@@ -113,6 +106,7 @@ class RuntimeDB:
         self.display = display
         self.errors = errors
         self._migrations_dir = migrations_dir
+        self._closed = False
 
     # ------------------------------------------------------------ 方言
     @property
@@ -154,15 +148,28 @@ class RuntimeDB:
         cur = self._raw.cursor()
         try:
             cur.execute(self._sql(sql), args)
-            return cur.fetchall()
+            rows = cur.fetchall()
         finally:
             cur.close()
+            # MySQL 在 autocommit=False 下，SELECT 也会隐式开启事务；只读场景必须
+            # 显式收尾，否则事务一直挂着（持有一致性读快照、undo 不回收）。
+            # 本模块 query 只用于 stats/history 这类只读查询，不在 transaction()
+            # 内调用，rollback 安全；连接已关（_closed）时跳过即可。
+            if not self._closed:
+                try:
+                    self._raw.rollback()
+                except Exception:
+                    pass
+        return rows
 
     # ------------------------------------------------------------ 事务
     def commit(self) -> None:
         self._raw.commit()
 
     def close(self) -> None:
+        if getattr(self, "_closed", False):
+            return
+        self._closed = True
         try:
             self._raw.commit()
         except Exception:
@@ -189,7 +196,13 @@ class RuntimeDB:
 
     # ------------------------------------------------------------ 体检
     def stats(self) -> dict[str, int]:
-        """全部业务表行数（按名字排序），供管理端「库体检」接口。"""
+        """全部业务表行数（按名字排序），供管理端「库体检」接口。
+
+        用一条 UNION ALL 聚合查询**一次往返**拿全表行数（精确计数，区别于
+        InnoDB `information_schema.tables.table_rows` 的采样估算）；表名来自
+        各自的系统表，可信，用方言对应的标识符引号转义后安全插值。这把原先
+        N+1（每张表一条 COUNT(*)）收敛成 2 次查询（1 次取表名 + 1 次 UNION ALL）。
+        """
         if self.dialect == "sqlite":
             names = [
                 row[0]
@@ -207,10 +220,16 @@ class RuntimeDB:
                     "ORDER BY table_name"
                 )
             ]
-        return {
-            name: self.query(f"SELECT COUNT(*) FROM {self._quote(name)}")[0][0]
-            for name in names
-        }
+        if not names:
+            return {}
+        parts = []
+        for n in names:
+            safe = n.replace("`", "``") if self.dialect == "mysql" else n.replace('"', '""')
+            parts.append(
+                f"SELECT '{safe}' AS t, COUNT(*) AS c FROM {self._quote(safe)}"
+            )
+        rows = self.query(" UNION ALL ".join(parts))
+        return {tbl: cnt for tbl, cnt in rows}
 
 
 # ---------------------------------------------------------------- 工厂
@@ -228,49 +247,38 @@ def _open_sqlite(path: Path, migrations_dir: Path | None) -> RuntimeDB:
     )
 
 
-def _ensure_mysql_schema(db: RuntimeDB) -> None:
-    """表已由 initdb 建好就跳过；否则补执行 migrations 原始 DDL（幂等）。
+def _ensure_mysql_schema(db: RuntimeDB, *, timeout: float = 60.0) -> None:
+    """确认 initdb 已建好关键表；**不**重跑 DDL（消除与 initdb 的双执行通道）。
 
-    compose 的 mysql healthcheck 用 `mysqladmin ping`，它在 mysqld 开始接受
-    连接时就 healthy，而 `/docker-entrypoint-initdb.d` 的 17 份 SQL 可能还在
-    跑。api 依赖 service_healthy 启动，所以这一层兜底是必须的。
+    compose 把 `migrations/` 挂到 `/docker-entrypoint-initdb.d`，MySQL 容器首启
+    自动执行 17 份 SQL（建库 + 50 表 + 71 索引 + 种子）——schema 的唯一来源就是
+    它。但 mysql 的 healthcheck 用 `mysqladmin ping`，mysqld 一接受连接就 healthy，
+    可能早于 initdb 跑完；api 依赖 `service_healthy` 启动，所以这里**轮询等待**关键
+    表就绪，而非像旧版那样再用 pymysql 重跑一份 `tools.migrate` 的 DDL（那样会与
+    initdb 形成两份执行通道的潜在分叉：镜像内 migrations 与挂载的 migrations 任
+    一改了，两边就会不一致）。
+
+    超时即明确报错并指向 initdb 挂载，避免静默卡死（compose 的 restart policy 会重试）。
     """
-    found = db.query(
-        "SELECT COUNT(*) FROM information_schema.tables "
-        "WHERE table_schema = DATABASE() "
-        "AND table_name IN ('sensor_readings','alarm_events')"
-    )[0][0]
-    if found == 2:
-        return
+    import time
 
-    # 与 db.py 相同的工程根补路径逻辑：容器里 PYTHONPATH=/app/src，
-    # tools/ 在 /app/tools，不在 import path 上。
-    import sys
-
-    root = Path(__file__).resolve().parents[3]
-    if str(root) not in sys.path:
-        sys.path.insert(0, str(root))
-    sys.modules.pop("tools", None)
-    from tools.migrate import migration_files  # type: ignore
-
-    cur = db._raw.cursor()
-    applied = 0
-    try:
-        for item in migration_files(db._migrations_dir):
-            for stmt in item.statements:
-                try:
-                    cur.execute(stmt)
-                    applied += 1
-                except Exception as exc:
-                    if _mysql_errno(exc) in _IDEMPOTENT_ERRNOS:
-                        continue
-                    raise RuntimeError(
-                        f"MySQL 补建表失败 {item.path.name}: {stmt[:120]!r}: {exc}"
-                    ) from exc
-        db._raw.commit()
-    finally:
-        cur.close()
-    log.info("MySQL 首次连接补建表：执行 %d 条 DDL", applied)
+    deadline = time.monotonic() + timeout
+    while True:
+        found = db.query(
+            "SELECT COUNT(*) FROM information_schema.tables "
+            "WHERE table_schema = DATABASE() "
+            "AND table_name IN ('sensor_readings','alarm_events')"
+        )[0][0]
+        if found >= 2:
+            return
+        if time.monotonic() >= deadline:
+            raise RuntimeError(
+                "等待 MySQL initdb 完成超时（%.0fs）：kitchen 库缺少 "
+                "sensor_readings/alarm_events 表。请确认 compose 的 ../migrations "
+                "已挂载到 /docker-entrypoint-initdb.d，且 mysql_data 卷未损坏。"
+                % timeout
+            )
+        time.sleep(2)
 
 
 def _open_mysql(url: str, migrations_dir: Path | None) -> RuntimeDB:

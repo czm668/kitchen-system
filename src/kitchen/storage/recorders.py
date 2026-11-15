@@ -33,6 +33,14 @@ __all__ = ["SqliteRecorder", "RuntimeRecorder"]
 #: （订单/刷卡/网络），它们的状态表在 A1 第二轮接写路径，这里不重复记。
 _ALARM_KINDS = frozenset({"rule", "guard", "fault-escalate"})
 
+# alarm_events.source 是 ENUM('rule','detector','llm')（见 migrations/002），
+# 这里按"触发子系统"归类；精确的告警类型由 scenario 列（VARCHAR(32)）承载。
+_SOURCE_BY_KIND = {
+    "rule": "rule",
+    "guard": "rule",                  # 保守保护（ConservativeGuards）也属规则判定
+    "fault-escalate": "detector",     # 传感器健康监视器升级，属 detector 一类
+}
+
 _TS_FMT = "%Y-%m-%d %H:%M:%S"
 
 
@@ -42,7 +50,7 @@ def _fmt_ts(value: datetime) -> str:
 
 
 def _clip(value: Any, limit: int) -> str | None:
-    """DDL 是 VARCHAR(255)/VARCHAR(48)，超长截断——落库绝不能因长文本而炸。"""
+    """DDL 为 message/snapshot VARCHAR(255)、atype VARCHAR(32)，超长截断——落库绝不能因长文本而炸。"""
     if value is None:
         return None
     text = str(value)
@@ -112,13 +120,16 @@ class SqliteRecorder:
         atype = _clip(body.get("atype") or body.get("rule_id") or kind, 32)
         message = _clip(body.get("message") or kind, 255)
         snapshot = _clip(json.dumps(body, ensure_ascii=False, default=str), 255)
+        # source 必须落在 ENUM('rule','detector','llm') 内（见 migrations/002）；
+        # 精确类型由 scenario 列承载，这里只做粗粒度子系统归类。
+        source = _SOURCE_BY_KIND.get(kind, "rule")
         try:
             with self._lock, self.conn.transaction():
                 self.conn.execute(
                     "INSERT INTO alarm_events "
                     "(scenario, device_id, source, level, atype, message, snapshot, handled, ts) "
-                    "VALUES (?, ?, 'rule', ?, ?, ?, ?, 0, ?)",
-                    (kind, self.device_id, level, atype, message, snapshot, _fmt_ts(ts)),
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?)",
+                    (kind, self.device_id, source, level, atype, message, snapshot, _fmt_ts(ts)),
                 )
         except self.conn.errors:
             self.write_failures += 1
