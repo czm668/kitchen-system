@@ -2,11 +2,15 @@
 
 > 交付说明：本目录的 Dockerfile / compose / nginx / systemd 是**部署模板**。
 > 答辩演示机走「Windows 裸机路径 A」（8848 端口），实测验证的是该路径与
-> `tools/backup.py` 备份恢复。开发机 11/15 已装 Docker Desktop 4.99、引擎
-> 验证通过，但**容器实测未完成**（国内直连 Docker Hub 拉镜像超时，见
-> `E:\docker-setup\INSTALL-GUIDE.md` 六-bis 与本文件 §四第 4 条）；Docker
-> 路径首次在能拉到镜像的机器上执行时，按报错微调即可（预期差异集中在
-> 路径分隔符与文件权限）。
+> `tools/backup.py` 备份恢复。
+>
+> **11/15 14:12 容器实测已完成**：Docker Desktop 4.99 / 引擎 29.9.3，
+> `docker compose up -d --build` 三容器全起（api healthy、mysql healthy、
+> backup running），`/api/health` 200、登录后 5 个核心接口全 200，
+> MySQL 首启 17 份迁移建出 50 张表。详见
+> `05_系统记录/20261115_A17容器实测记录.md`。
+> 镜像源只留 `docker.m.daocloud.io`（实测 4.73 MB/s；`docker.1ms.run`
+> 仅 19 KB/s，多源按序不切换会拖死 build，见 `INSTALL-GUIDE.md` 六-bis）。
 
 ## 一、两条部署路径
 
@@ -102,6 +106,17 @@ python tools/backup.py --db var/runtime.db --keep 14
 # 3) 起服务；GET /api/admin/db/stats 核对表行数与备份前一致
 ```
 
+**compose 备份侧车**（11/15 实测）：`deploy/backup-sidecar.sh` 以 `:ro`
+挂进容器，每天 02:00（容器 UTC，约合北京时间 10:00）把 `api_var` 卷
+打成 `/dest/api_var_YYYYMMDD.tar.gz` 并删 14 天前的旧包。
+**只归档卷，不做 mysqldump**；MySQL 逻辑备份未接入，属未实施项，
+答辩别把侧车说成"数据库备份已闭环"。手动验证归档链路：
+
+```bash
+docker exec kitchen-backup sh -c 'tar czf /dest/probe.tar.gz -C /source var'
+# 实测产出 617K 的 tar 包；验证完删掉 probe 文件
+```
+
 恢复验证已实测：备份包解出的快照可正常打开查询（sensor_readings /
 alarm_events 行数与备份前一致）。
 
@@ -116,13 +131,29 @@ alarm_events 行数与备份前一致）。
    卷里有旧数据时改用 `docker exec -i kitchen-mysql mysql -ukitchen -p
    kitchen < migrations/0XX_xxx.sql` 手动补（或清空 `mysql_data` 卷重建）。
    当前共 17 份（001→017），逐份补时按文件名序。
-4. **国内拉镜像超时**：`python:3.11-slim` / `mysql:8.4` 从 Docker Hub
-   拉取，直连超时报 `registry-1.docker.io:443` 连接失败。在 Docker Desktop
-   → Settings → Docker Engine 配 `registry-mirrors`，或 Resources → Proxies
-   填 HTTPS 代理，然后 Apply & Restart。与代码无关，引擎本身已正常。
+4. **国内拉镜像超时 / 慢源拖死 build**：`python:3.11-slim` / `mysql:8.4`
+   从 Docker Hub 拉取，直连超时报 `registry-1.docker.io:443` 连接失败。
+   在 Docker Desktop → Settings → Docker Engine 配 `registry-mirrors`，
+   或 Resources → Proxies 填 HTTPS 代理，然后 Apply & Restart。与代码无关。
+   **实测（11/15）**：同时配两个源时 `docker.1ms.run` 只有 19 KB/s、
+   `docker.m.daocloud.io` 有 4.73 MB/s；Docker 按序尝试、慢源不报错就
+   **不会自动切到快源**，导致 build 超时退出。删掉慢源只留一个即解决。
 5. **systemd 起不来**：`kitchen.env` 权限必须是 600 且属主 root（否则
    systemd 拒读），`ProtectSystem=strict` 下只有 var/backups 可写，
    代码目录改文件会被拒。
 6. **Windows 上 `python -m kitchen.api.server` 找不到模块**：便携解释器
    是 `._pth` 模式，`-m` 不吃 PYTHONPATH——用仓库根的 pytest 配置跑，或
    `cd 02_项目代码/kitchen/src && python -m kitchen.api.server ...`。
+7. **backup 容器 `Restarting (2)`**：早期 compose 把备份逻辑写成内联
+   `sh -c "if [ $$(( ... %% ... )) ...]"`；compose 的 `$$` 会被插值成 `$`，
+   而 `%` **不是** compose 转义符（`%%` 会原样传给 sh），算术表达式非法，
+   容器每分钟崩一次。现改为独立脚本 `deploy/backup-sidecar.sh` 以
+   `:ro` 挂载、`entrypoint: ["sh", "/backup-sidecar.sh"]`，无插值歧义。
+8. **admin 口令不是 `kitchen2026`**：api 启动日志里那句是没设环境变量时
+   的兜底演示账号；compose 通过 `.env` 注入 `KITCHEN_ADMIN_PASSWORD`
+   会覆盖它。登录用 `.env` 里的真实口令，别拿日志里的默认值试。
+9. **MySQL 索引数对不上**：`tools/migrate.py check` 报 **71 索引**，而
+   MySQL `information_schema.statistics` 查出来 **217 行**——后者把
+   52 个 PRIMARY 与各列的 UNIQUE/隐式索引都算进去了，71 是迁移脚本里
+   显式 `CREATE INDEX` 条数。两者口径不同，不是迁移漏执行；**表数 50
+   才是对齐判据**。

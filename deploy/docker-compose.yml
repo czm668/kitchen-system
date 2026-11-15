@@ -56,20 +56,19 @@ services:
       retries: 10
     restart: unless-stopped
 
-  # 备份侧车：每晚 02:00 打包 MySQL 与 api 卷（backup.py 逻辑，容器化版）
-  # 简化口径：MySQL 侧用 mysqldump，api 卷直接打 zip——恢复步骤见 README
+  # 备份侧车：每天 02:00 打包 api_var 卷（14 天滚动）。
+  # 简化口径：只做卷归档；MySQL 逻辑备份（mysqldump）未接入，见脚本头注释。
   backup:
     image: python:3.11-slim
     container_name: kitchen-backup
     volumes:
       - api_var:/source/var:ro
       - api_backups:/dest
-    entrypoint: >
-      sh -c "while true; do
-        if [ $$(( ( $(date +%%s) / 60 ) %% 1440 )) -eq 120 ]; then
-          python -c 'true'; tar czf /dest/mysql_$(date +%%Y%%m%%d).tar.gz /source/var;
-          find /dest -name 'mysql_*.tar.gz' -mtime +14 -delete;
-        fi; sleep 60; done"
+      - ./backup-sidecar.sh:/backup-sidecar.sh:ro
+    # 用独立脚本 + sh 显式执行：避开 compose 字符串插值（$$）与 % 转义的坑。
+    # 2026-11-15 修正：原先内联 `sh -c "if [ $$((...%%...)) ...]"` 传给容器后
+    # 变成非法算术表达式，容器每分钟崩一次（Restarting (2)）。
+    entrypoint: ["sh", "/backup-sidecar.sh"]
     restart: unless-stopped
 
 volumes:
