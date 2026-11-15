@@ -1,0 +1,54 @@
+# 构建上下文白名单的补集：只让 Dockerfile 真正 COPY 的内容传给 daemon。
+# compose 的 build.context 是仓库根 ".."，若不排除，会把 datasets/（2.3G）、
+# runs/、weights/、.git/ 等一并打包发送，首次 build 会极慢甚至卡死。
+# 新增于 2026-11-15（A15 之后、首次容器实测之前）。
+
+# —— 大体积数据 / 训练产物 ——
+datasets/
+runs/
+weights/
+vendor/
+Ultralytics/
+backups/
+var/
+.local/
+.mplcache/
+mplcache/
+
+# —— 版本库与临时文件 ——
+.git/
+.gitignore
+tmp*
+pip-*
+__pycache__/
+*.py[cod]
+*.pt
+*.onnx
+*.log
+*.db
+*.sqlite3
+
+# —— 前端依赖与构建产物（镜像内不托管 web/） ——
+web/
+miniapp/
+
+# —— 测试与本地工具产物（Dockerfile 未 COPY） ——
+tests/
+.pytest_cache/
+.coverage
+htmlcov/
+
+# —— 部署目录本身 & 含真实口令的环境文件 ——
+# 注意：deploy/Dockerfile 由 compose 通过 build.dockerfile 单独指定，不受此规则影响
+deploy/
+**/.env
+.env
+*.bundle
+
+# Dockerfile 实际 COPY 的目录（显式保留，防止上面通配误伤）：
+!pyproject.toml
+!src/
+!tools/
+!fixtures/
+!migrations/
+!scenarios/

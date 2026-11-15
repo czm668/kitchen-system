@@ -14,6 +14,11 @@ FROM python:3.11-slim AS base
 RUN useradd --create-home --shell /usr/sbin/nologin kitchen
 WORKDIR /app
 
+# 包在 /app/src 下，`python -m kitchen.api.server` 的默认 sys.path[0] 是
+# WORKDIR(/app)，不加这一行容器启动会 No module named kitchen。
+# （裸机 Windows 走仓库根 pytest 配置，不需要；容器是标准 CPython，PYTHONPATH 生效）
+ENV PYTHONPATH=/app/src
+
 # 依赖层：本工程运行期零第三方依赖（标准库），只装运行环境需要的部分。
 # 单独 COPY pyproject 是为了利用 Docker 层缓存——代码改动不触发重装。
 COPY pyproject.toml ./
@@ -27,10 +32,9 @@ COPY scenarios/ ./scenarios/
 RUN mkdir -p /app/var /app/backups && chown -R kitchen:kitchen /app
 USER kitchen
 
-ENV PYTHONUNBUFFERED=1 \
-    # prod 安全三件套（compose/systemd 里显式覆盖，这里是兜底提示）
-    KITCHEN_ADMIN_PASSWORD="" \
-    KITCHEN_API_SECRET=""
+# prod 安全：KITCHEN_ADMIN_PASSWORD / KITCHEN_API_SECRET 只由 compose/systemd
+# 运行时注入，镜像里不写任何默认值（Dockerfile lint 会拦 ENV 中的敏感变量名）。
+ENV PYTHONUNBUFFERED=1
 
 EXPOSE 8848
 
