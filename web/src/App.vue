@@ -26,6 +26,7 @@ import StationsView from './views/StationsView.vue'
 import EnvironmentView from './views/EnvironmentView.vue'
 import RecipesView from './views/RecipesView.vue'
 import ComplianceView from './views/ComplianceView.vue'
+import ComplianceCredentialView from './views/ComplianceCredentialView.vue'
 import TicketsView from './views/TicketsView.vue'
 import GuestView from './views/GuestView.vue'
 import FinanceView from './views/FinanceView.vue'
@@ -42,6 +43,7 @@ const ROUTES = [
   { key: 'environment', path: '#/environment', label: '环境与设备', icon: 'env', view: EnvironmentView },
   { key: 'recipes', path: '#/recipes', label: '配方与工艺', icon: 'recipe', view: RecipesView },
   { key: 'compliance', path: '#/compliance', label: '批次与资质', icon: 'shield', view: ComplianceView },
+  { key: 'credential', path: '#/credential', label: '合规凭证', icon: 'shield', view: ComplianceCredentialView },
   { key: 'tickets', path: '#/tickets', label: '工单中心', icon: 'ticket', view: TicketsView },
   { key: 'guest', path: '#/guest', label: '客诉与画像', icon: 'chat', view: GuestView },
   { key: 'finance', path: '#/finance', label: '经营账本', icon: 'chart', view: FinanceView },

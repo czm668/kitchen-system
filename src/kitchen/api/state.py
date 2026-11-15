@@ -46,6 +46,7 @@ from typing import Any, Iterable, Mapping, Sequence
 from ..channels import Channel, InterlockController
 from ..domain import CST
 from ..finance.service import FinanceService
+from ..compliance.service import ComplianceService
 from ..guest.llm import make_provider
 from ..guest.service import GuestService
 from ..process.cooking import CookingBoard
@@ -302,6 +303,13 @@ class AppState:
         # 溯源查询（A9-05）：域层早已有 TraceService，此前只有批次页在用；
         # 顾客扫码要直接查 view/label，这里装配成正式接口。
         self.trace = TraceService(self.repo)
+        # A13 扩展模块：食安合规凭证（每日检查表 / 批次一页纸 / 合规日报）。
+        # 必须装配在 trace 之后——dossier() 运行时要用 codes_of/view/outbound_blockers。
+        # 与 A11/A12 共用同一个 provider 实例，配 key 后三处一起切 live。
+        self.compliance = ComplianceService(
+            self, provider=self.llm_provider,
+            journal_path=None if var is None else var / "compliance_journal.jsonl",
+        )
         self.duty = DutyGuard(
             self.admission, clock=self.now, wall_clock=self.to_datetime
         )

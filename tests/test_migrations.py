@@ -211,9 +211,10 @@ def test_column_after_clause_is_stripped():
 def test_all_migrations_execute_without_error(run: migrate.SqliteRun):
     assert run.passes == 2, "必须跑两遍验证幂等"
     # 015 新增 A11 扩展模块 4 张表（顾客画像/客诉/证据/补偿凭证），
-    # 016 新增 A12 经营账本 3 张表（流水/菜品标准成本/期间费用）
-    assert run.total_tables == 49, (
-        f"应为 13 张底座 + 29 张新表 + 4 张 A11 + 3 张 A12 = 49，实际 {run.total_tables}")
+    # 016 新增 A12 经营账本 3 张表（流水/菜品标准成本/期间费用），
+    # 017 新增 A13 合规凭证 1 张表（每日检查表快照）
+    assert run.total_tables == 50, (
+        f"应为 13 张底座 + 29 张新表 + 4 张 A11 + 3 张 A12 + 1 张 A13 = 50，实际 {run.total_tables}")
 
 
 def test_mysql_only_statements_are_limited_to_collation_file():
@@ -342,8 +343,8 @@ def test_offline_records_dedupes_by_device_and_seq(db: sqlite3.Connection):
 def test_check_passes():
     result = migrate.check()
     assert result["passed"] is True, "\n".join(result["problems"])
-    assert result["stats"]["files"] == 16
-    assert result["stats"]["tables_total"] == 49
+    assert result["stats"]["files"] == 17
+    assert result["stats"]["tables_total"] == 50
 
 
 def test_check_catches_missing_collation(tmp_path: Path):

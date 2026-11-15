@@ -77,6 +77,9 @@ _PERMISSIONS: dict[str, frozenset[str]] = {
     # 组长、操作员、观察员一律 403——比阈值配置更敏感，宁可收窄。
     "finance.read": frozenset({"manager"}),
     "finance.write": frozenset({"manager"}),
+    # A13 合规凭证：组长要拿检查表去现场核缺口，经理要看归档；
+    # 观察员/操作员不给（缺口明细属管理信息）。导出同权限，不单独放宽。
+    "compliance.read": frozenset({"lead", "manager"}),
 }
 
 

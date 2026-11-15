@@ -300,6 +300,9 @@ class Router:
         # A12 经营账本（仅管理端）。同样独立成文件，删这一行即可整体摘掉。
         from .finance_api import register_finance_routes
         register_finance_routes(self)
+        # A13 食安合规凭证（仅管理端，全只读）。删这一行即可整体摘掉。
+        from .compliance_api import register_compliance_routes
+        register_compliance_routes(self)
 
     # ------------------------------------------------------------ 特殊 handler
     def _login(self, state, session, params, data) -> dict[str, Any]:
