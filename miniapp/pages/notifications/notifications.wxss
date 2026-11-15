@@ -1,0 +1,14 @@
+@import "../../templates/common.wxss";
+
+.notify-row {
+  display: flex; flex-direction: row; align-items: flex-start;
+  padding: 22rpx 0;
+}
+.notify-row + .notify-row { border-top: 1rpx solid #e5e5ea; }
+.notify-row:first-child { padding-top: 0; }
+.notify-row:last-child { padding-bottom: 0; }
+.notify-dot {
+  width: 14rpx; height: 14rpx; border-radius: 50%;
+  background: #e5e5ea; margin: 14rpx 18rpx 0 0; flex-shrink: 0;
+}
+.notify-dot.dot--info { background: #0071e3; }

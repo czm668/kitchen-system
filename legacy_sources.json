@@ -1,0 +1,144 @@
+{
+  "schema": 1,
+  "updated": "2026-11-12",
+  "project": "基于 ESP32 的后厨智能调度与食安合规管理系统的设计与实现",
+  "baseline": "毕设项目/04_系统记录/20261112_新选题差距分析与落地路线.md §1.1 / §2.2 / §8",
+  "legacy_root": "../毕设项目/02_项目代码/proj",
+  "legacy_root_absolute": "D:/liulan1/毕设/毕设项目/02_项目代码/proj",
+  "note": "旧 proj/ 降级为只读素材库：新工程不整包复制、不运行时跨目录 sys.path 引用，只按 bundle 显式取用。分类口径来自 reuse_manifest.json 六区与差距文档 12 行总表。",
+  "policy": {
+    "mode": "copy",
+    "vendor_dir": "vendor",
+    "path_prefix": "proj",
+    "record": "vendor/SOURCES.json",
+    "max_file_mb": 20,
+    "max_bundle_files": 500,
+    "preserve_relative_path": true,
+    "note": "保持素材库原始相对路径落到 vendor/proj/ 下，使旧代码的 from kernel... import ... 不因搬迁而断；台账记录 sha256，可 verify。取用文件只读，要改造先复制进 src/kitchen/。"
+  },
+  "forbidden": {
+    "zones": ["FROZEN"],
+    "path_prefixes": [
+      "scenarios/mingchu.json",
+      "scenarios/lab_safety.json",
+      "plugins/mingchu/",
+      "plugins/lab_safety/",
+      "annotations/chef_hat/",
+      "datasets/",
+      ".verify/",
+      "tools/s33_chef_hat.py",
+      "tools/s33_pexels.py",
+      "tools/verify_chef_hat.py"
+    ],
+    "allow_exact": [
+      "plugins/mingchu/drivers/dht11.py",
+      "plugins/mingchu/drivers/mq2.py"
+    ],
+    "allow_exact_reason": "差距文档 §2.2：13 项硬件中 DHT11 / MQ-2 采样逻辑属 PORT 分区，允许取用后拷进 src/kitchen/drivers/ 改造；禁止跨场景直接 import。",
+    "must_block": [
+      "datasets/chef_hat/raw_videos/a.mp4",
+      "annotations/chef_hat/labels/a.txt",
+      "scenarios/mingchu.json",
+      "plugins/lab_safety/drivers/mq135.py",
+      "plugins/mingchu/drivers/relay.py",
+      ".verify/pages/login.mjs",
+      "tools/s33_chef_hat.py"
+    ],
+    "must_block_note": "自检样本：check 逐条确认这些路径确实被拦，防止有人把规则改松后没人发现。",
+    "action_names": ["valve_close", "valve_open"],
+    "action_reason": "旧场景动作名与 kitchen 的 CH1 燃气阀 / CH3 工位插座不是同一执行对象，禁止带入新工程。"
+  },
+  "bundles": {
+    "platform-bus": {
+      "zone": "CORE",
+      "paths": ["kernel/bus/**", "kernel/config.py", "kernel/__init__.py"],
+      "reason": "MQTT 接入与设备契约：主题、payload 展平、时间戳钳制；13 项外设都是普通 metric",
+      "ref": "差距文档 §1.1 #1 / §1.2(1)"
+    },
+    "plugin-host": {
+      "zone": "CORE",
+      "paths": ["kernel/plugins/**", "plugins/base.py", "plugins/__init__.py"],
+      "reason": "场景 manifest 校验与驱动动态发现；新工程当前用自带薄层，接入平台时替换",
+      "ref": "差距文档 §1.1 #12"
+    },
+    "command-engine": {
+      "zone": "CORE",
+      "paths": ["kernel/commands/**"],
+      "reason": "命令状态机 pending→sent→acked/failed、ACK 幂等、重试退避、规则命中自动下发",
+      "ref": "差距文档 §1.1 #4/#5"
+    },
+    "readings-db": {
+      "zone": "CORE",
+      "paths": ["kernel/db/**", "migrations/**"],
+      "reason": "分钟桶预聚合、水位、迁移器与 001–013 已建表；新表一律 014+ 追加",
+      "ref": "差距文档 §1.1 #6/#9 / §7"
+    },
+    "auth-audit-ws": {
+      "zone": "CORE",
+      "paths": ["kernel/auth/**", "kernel/audit/**", "kernel/ws/**"],
+      "reason": "JWT 角色鉴权、操作审计、WS 有界队列与慢连接摘除",
+      "ref": "差距文档 §1.1 / README 项目状态"
+    },
+    "api-core": {
+      "zone": "CORE",
+      "paths": ["kernel/api/**", "kernel/main.py", "kernel/scenario.py", "kernel/host/**", "kernel/engines/**"],
+      "reason": "FastAPI 装配、REST、内部接口、调度器宿主",
+      "ref": "差距文档 §8 底座复用约 70%"
+    },
+    "platform-contracts": {
+      "zone": "CORE",
+      "paths": ["docs/interface.md", "docs/CHANGELOG-interface.md", "requirements.txt", "Dockerfile", "docker-compose.yml", "pytest.ini", "conftest.py"],
+      "reason": "平台层冻结契约、依赖清单、容器编排与回归配置",
+      "ref": "docs/kitchen-contract.md §0 权威关系"
+    },
+    "rules-engine": {
+      "zone": "ADAPT",
+      "paths": ["kernel/rules/**"],
+      "reason": "需改造：16 个判定点中 13 个表达不了，要扩 per-rule duration / 窗口聚合 / 区间 / 档位 / 闩锁",
+      "ref": "差距文档 §1.1 #2 / §3"
+    },
+    "alarms": {
+      "zone": "ADAPT",
+      "paths": ["kernel/alarms/**"],
+      "reason": "需改造：alarm_events 只有 handled 0/1，工单的指派/整改/复核/附件/升级需新表",
+      "ref": "差距文档 §1.1 #3"
+    },
+    "vision-pipeline": {
+      "zone": "ADAPT",
+      "paths": ["ai_service/**", "kernel/detectors/**"],
+      "reason": "需改造：抽帧/多模型/去抖/抓拍/幂等可复用，类别需换成吸烟/玩手机/工服",
+      "ref": "差距文档 §1.1 #8 / P5"
+    },
+    "web-shell": {
+      "zone": "ADAPT",
+      "paths": ["web/**"],
+      "exclude": ["web/node_modules", "web/dist", "web/.vite", "web/package-lock.json"],
+      "reason": "需改造：七页留作壳与登录，调度看板/甘特/配方/批次/工单/KPI 等 8 页全部新建",
+      "ref": "差距文档 §1.1 #11 / §2.3"
+    },
+    "simulator": {
+      "zone": "ADAPT",
+      "paths": ["tools/sim_device.py"],
+      "reason": "需扩展：多场景模拟器底座；新工程已有 kitchen-only 精简版，真机联调时参考其 paho/HTTP 注入实现",
+      "ref": "差距文档 §1.1 #10"
+    },
+    "sensor-drivers": {
+      "zone": "PORT",
+      "paths": ["plugins/mingchu/drivers/dht11.py", "plugins/mingchu/drivers/mq2.py"],
+      "reason": "仅采样逻辑可取，须拷进 src/kitchen/drivers/ 换驱动 id 与语义后改造，禁止直接 import",
+      "ref": "差距文档 §2.2"
+    },
+    "prelabel-tool": {
+      "zone": "PORT",
+      "paths": ["tools/s33_prelabel.py"],
+      "reason": "标注预标工具链可改造给吸烟/玩手机/工服类别；数据集本身不可复用",
+      "ref": "差距文档 §1.3 / P5"
+    },
+    "regression-baseline": {
+      "zone": "CORE",
+      "paths": ["tests/**"],
+      "reason": "旧工程 369 passed 回归基线，仅作行为对照，不直接搬进新工程 tests/",
+      "ref": "04_系统记录/20261112_代码复用性整理清单.md"
+    }
+  }
+}

@@ -1,0 +1,39 @@
+<import src="../../templates/common.wxml"/>
+
+<view class="page">
+  <view wx:if="{{rows.length}}" class="section">
+    <view class="section-title">全部消息</view>
+    <view class="section-hint" bindtap="markAllRead">全部标为已读</view>
+  </view>
+
+  <template wx:if="{{error}}" is="state-error" data="{{error: error}}"/>
+  <template wx:elif="{{loading}}" is="state-loading" data="{{}}"/>
+  <template wx:elif="{{rows.length === 0}}" is="state-empty"
+            data="{{mark: '·', title: '还没有消息', hint: '下单、催菜、出餐后，后厨的动态会出现在这里', actionText: '看看订单'}}"/>
+
+  <block wx:else>
+    <view class="card">
+      <view wx:for="{{rows}}" wx:key="seq" class="notify-row">
+        <view class="notify-dot {{item.unread ? 'dot--info' : ''}}"></view>
+        <view class="grow">
+          <view class="row between">
+            <view class="badge {{item.unread ? 'info' : 'plain'}} badge--sm">{{item.kind_label}}</view>
+            <text class="caption num">{{item.time_text}}</text>
+          </view>
+          <view class="title" style="margin-top: 10rpx; {{item.unread ? '' : 'font-weight: 400;'}}">
+            {{item.message}}
+          </view>
+          <view wx:if="{{item.order_no}}" class="caption" style="margin-top: 6rpx;">
+            订单 {{item.order_no}}
+          </view>
+        </view>
+      </view>
+    </view>
+    <view class="card card--flat">
+      <view class="caption">
+        当前为轮询模拟：真机要接微信订阅消息模板（需企业资质），数据流无需改动，
+        把服务端通知队列的消费者换成微信 API 即可。
+      </view>
+    </view>
+  </block>
+</view>

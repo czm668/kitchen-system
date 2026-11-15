@@ -1,0 +1,37 @@
+<!-- 三态模板：加载 / 错误 / 空。页面里 <import src="../../templates/common.wxml"/>
+     并 @import "../../templates/common.wxss"; 然后用 is 引用。
+     错误卡的「重试」按钮 bindtap="retry"，引用页面必须定义 retry()。 -->
+<template name="state-loading">
+  <view class="card">
+    <view class="skeleton-line skeleton-line--mid"></view>
+    <view class="skeleton-line"></view>
+    <view class="skeleton-line skeleton-line--short"></view>
+  </view>
+  <view class="card">
+    <view class="skeleton-line skeleton-line--mid"></view>
+    <view class="skeleton-line"></view>
+  </view>
+  <view class="card">
+    <view class="skeleton-line skeleton-line--mid"></view>
+    <view class="skeleton-line skeleton-line--short"></view>
+  </view>
+</template>
+
+<template name="state-error">
+  <view class="card empty-card">
+    <view class="empty-card__mark">!</view>
+    <view class="empty-card__title">加载失败</view>
+    <view class="empty-card__hint">{{error}}</view>
+    <view class="btn ghost btn--sm" style="margin: 32rpx auto 0; width: 240rpx;" bindtap="retry">重新加载</view>
+  </view>
+</template>
+
+<template name="state-empty">
+  <view class="card empty-card">
+    <view class="empty-card__mark">{{mark || '·'}}</view>
+    <view class="empty-card__title">{{title}}</view>
+    <view class="empty-card__hint">{{hint}}</view>
+    <view wx:if="{{actionText}}" class="btn btn--sm" style="margin: 32rpx auto 0; width: 280rpx;"
+          bindtap="emptyAction">{{actionText}}</view>
+  </view>
+</template>

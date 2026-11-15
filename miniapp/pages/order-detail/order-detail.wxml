@@ -1,0 +1,72 @@
+<import src="../../templates/common.wxml"/>
+
+<view class="page">
+  <template wx:if="{{!order && error}}" is="state-error" data="{{error: error}}"/>
+
+  <block wx:if="{{order}}">
+    <view class="card">
+      <view class="row between">
+        <view class="h2" bindtap="copyOrderNo">{{order.order_no}}</view>
+        <view class="badge {{order.finished ? 'ok' : 'info'}}">{{order.finished ? '已完成' : '进行中'}}</view>
+      </view>
+      <view class="caption" style="margin-top: 8rpx;">点订单号可复制</view>
+
+      <view class="progress" style="margin-top: 28rpx;">
+        <view class="progress__fill {{order.finished ? 'progress__fill--ok' : ''}}"
+              style="width: {{order.percent}}%;"></view>
+      </view>
+      <view class="row between" style="margin-top: 12rpx;">
+        <view class="caption">整单进度 {{order.percent}}%</view>
+        <view class="caption">共 {{order.item_count}} 份</view>
+      </view>
+
+      <view class="divider"></view>
+      <view class="kv"><text class="kv__k">桌台</text><text class="kv__v">{{order.table_id || '-'}} 号桌</text></view>
+      <view wx:if="{{order.customer_ref}}" class="kv"><text class="kv__k">顾客编号</text><text class="kv__v num">{{order.customer_ref}}</text></view>
+      <view class="kv"><text class="kv__k">下单时间</text><text class="kv__v num">{{order.created_text}}</text></view>
+      <view class="kv"><text class="kv__k">预计出餐</text><text class="kv__v num">{{order.due_text}}</text></view>
+      <view class="kv"><text class="kv__k">剩余</text><text class="kv__v num">{{order.remain_minutes}} 分钟</text></view>
+    </view>
+
+    <view class="section"><view class="section-title">菜品进度</view>
+      <view class="section-hint">下拉可刷新</view></view>
+
+    <view wx:for="{{order.items}}" wx:key="id" class="card">
+      <view class="row between">
+        <view class="title">{{item.dish_name}} × {{item.qty}}</view>
+        <view class="badge {{item.state_tone}} badge--sm">{{item.state_label}}</view>
+      </view>
+
+      <view class="steps" style="margin-top: 24rpx;">
+        <view wx:for="{{item.stages}}" wx:for-item="stage" wx:key="name"
+              class="steps__item {{stage.current ? 'steps__item--on' : ''}}">
+          {{stage.name}}
+        </view>
+      </view>
+      <view class="progress" style="margin-top: 12rpx;">
+        <view class="progress__fill {{item.percent === 100 ? 'progress__fill--ok' : ''}}"
+              style="width: {{item.percent}}%;"></view>
+      </view>
+
+      <view class="row between" style="margin-top: 20rpx;">
+        <view class="caption">
+          {{item.eta_text}}<text wx:if="{{item.urge_count > 0}}"> · 已催 {{item.urge_count}} 次</text>
+        </view>
+        <view wx:if="{{item.can_urge}}"
+              class="btn ghost btn--sm {{item.urge_disabled ? 'disabled' : ''}}"
+              bindtap="urge" data-id="{{item.id}}">{{item.urge_text}}</view>
+      </view>
+    </view>
+
+    <view class="card card--flat">
+      <view class="caption">
+        进度来自后厨工单状态（受理 → 排队 → 派单 → 制作 → 出锅 → 上桌）；
+        每道菜催菜间隔 30 秒，由服务端限频。
+      </view>
+    </view>
+    <view class="card card--tap list-link" bindtap="goTrace">
+      <view class="row gap-12"><view class="badge info">溯源</view><view>扫餐盘标签查这批菜的批次与供应商</view></view>
+      <text class="arrow">›</text>
+    </view>
+  </block>
+</view>

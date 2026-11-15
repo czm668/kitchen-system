@@ -1,0 +1,20 @@
+{
+  "name": "kitchen-web",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "后厨智能调度与食安合规管理系统 - 管理端",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview --port 4173"
+  },
+  "dependencies": {
+    "echarts": "^5.6.0",
+    "vue": "^3.5.13"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-vue": "^5.2.1",
+    "vite": "^6.0.7"
+  }
+}

@@ -1,0 +1,38 @@
+# CI（A7）：只是 tools/ci.py 的平台包装——逻辑全部本地已验证。
+# 本工程当前不是 git 仓库，此文件未真实运行过；推上 GitHub 后首次
+# 运行若因环境差异报错（依赖版本、路径），按提示微调即可。
+name: kitchen-ci
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: 安装依赖（含可选组）
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[test]"
+          pip install pytest-cov   # 覆盖率可选依赖，ci.py --cov 用
+
+      - name: 跑全部质量关卡（pytest + 迁移校验 + web_check + miniapp_check）
+        run: python tools/ci.py --cov
+
+      - name: 上传覆盖率报告
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage
+          path: coverage.xml
+          if-no-files-found: ignore

@@ -1,0 +1,42 @@
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.coverage
+htmlcov/
+*.egg-info/
+
+# 运行时产物：证据包（抓拍留证）、回放帧、临时文件
+var/
+.local/
+
+# 从素材库取用的文件不重复入库；台账与说明保留，换机器可一键重新取用。
+vendor/*
+!vendor/README.md
+!vendor/SOURCES.json
+
+.env
+.env.local
+
+# 固件凭据（模板是 secrets.h.example，填好的 secrets.h 不入库）
+secrets.h
+
+# 前端：依赖与构建产物不入库（`npm ci && npm run build` 可重建）
+web/node_modules/
+web/dist/
+
+# 数据集与训练产物：几 GB，可重新生成，绝不入库
+datasets/
+runs/
+
+# 预训练底座权重（Ultralytics 官方模型，首次运行自动下载）
+yolov8n.pt
+
+# 本机安装依赖时的 pip 临时目录残留（不是工程内容）
+/pip-*/
+/pip-*.json
+/tmp*/
+
+# 编辑器/系统残留
+.DS_Store
+Thumbs.db
+desktop.ini

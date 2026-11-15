@@ -1,0 +1,19 @@
+{
+  "settings_version": "0.0.8",
+  "datasets_dir": "D:\\liulan1\\\u6bd5\u8bbe\\kitchen-system\\02_\u9879\u76ee\u4ee3\u7801\\kitchen\\datasets",
+  "weights_dir": "weights",
+  "runs_dir": "runs",
+  "uuid": "dd7685d3ba65bce5b531d051f09fe154abed37eaa254d5387023157e9c70d80e",
+  "sync": true,
+  "api_key": "",
+  "openai_api_key": "",
+  "clearml": true,
+  "comet": true,
+  "dvc": true,
+  "mlflow": true,
+  "raytune": true,
+  "tensorboard": false,
+  "wandb": false,
+  "vscode_msg": true,
+  "openvino_msg": true
+}

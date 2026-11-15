@@ -1,0 +1,60 @@
+.tag-row { display: flex; flex-wrap: wrap; gap: 12rpx; margin-top: 18rpx; }
+.tag-pill {
+  padding: 10rpx 22rpx;
+  border-radius: 999rpx;
+  font-size: 26rpx;
+  color: var(--muted, #6e6e73);
+  background: var(--panel-2, #f5f5f7);
+  border: 1rpx solid rgba(0, 0, 0, 0.06);
+}
+.tag-pill.on {
+  color: #fff;
+  background: #0071e3;
+  border-color: #0071e3;
+}
+
+.textarea {
+  width: 100%;
+  min-height: 150rpx;
+  box-sizing: border-box;
+  margin-top: 14rpx;
+  padding: 18rpx;
+  border-radius: 14rpx;
+  background: var(--panel-2, #f5f5f7);
+  font-size: 28rpx;
+  line-height: 1.6;
+  color: var(--text, #1d1d1f);
+}
+.input {
+  width: 100%;
+  box-sizing: border-box;
+  margin-top: 14rpx;
+  padding: 16rpx 18rpx;
+  border-radius: 14rpx;
+  background: var(--panel-2, #f5f5f7);
+  font-size: 28rpx;
+  color: var(--text, #1d1d1f);
+}
+
+.submit-btn {
+  margin-top: 24rpx;
+  padding: 22rpx 0;
+  border-radius: 14rpx;
+  text-align: center;
+  font-size: 30rpx;
+  font-weight: 500;
+  color: #fff;
+  background: #0071e3;
+}
+.submit-btn.disabled { opacity: 0.55; }
+.submit-btn.ghost {
+  margin-top: 20rpx;
+  padding: 16rpx 0;
+  font-size: 27rpx;
+  color: #0071e3;
+  background: rgba(0, 113, 227, 0.08);
+}
+
+.card--ai {
+  border-left: 6rpx solid #0071e3;
+}

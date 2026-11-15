@@ -1,0 +1,128 @@
+{
+  "schema": 1,
+  "scenario": "kitchen",
+  "updated": "2026-11-12",
+  "note": [
+    "场景级规则补充配置：只放 env_thresholds 表里没有的语义（动作建议、闩锁、多源交叉、文案）。",
+    "阈值本体一律不写在这里，避免同一份阈值出现两个来源。",
+    "键 = metric（env_thresholds 需 join env_points.metric）；同一指标多档位规则共享本配置，",
+    "需要按档位区分时用 by_profile 覆盖（#2 排烟营业档「仅预警」就是这么表达的），",
+    "需要按严重度区分时用 by_level（#5 冷链 level1 预警 / level2 报警），",
+    "需要给单条规则开小灶时用 by_rule（按 env_thresholds.id）。叠加顺序：base → by_profile → by_level → by_rule。",
+    "actions 必须是 kitchen 契约里的 9 个动作之一，装载后由 InterlockController 再裁决一次。"
+  ],
+  "rules": {
+    "gas_level": {
+      "atype": "燃气泄漏",
+      "message": "燃气浓度超阈值",
+      "latch": true,
+      "actions": ["gas_valve_close", "fan_on", "alarm_light_on", "voice_play"],
+      "by_rule": {
+        "1": {
+          "duration_sec": 0,
+          "note": "04 文档 §0.2：安全类联锁不设人工等待延迟，超泄漏门限立即关阀。其余规则用引擎默认 3 秒去抖抑制单点噪声。"
+        },
+        "2": {
+          "actions": ["alarm_light_on", "voice_play"],
+          "latch": false,
+          "message": "燃气浓度持续偏高，尚未达泄漏门限",
+          "note": "预警级（level=1）：只播报不动作。泄了才关阀——预警期关阀会让正常炒菜被打断。"
+        }
+      },
+      "note": "04 文档 §0.4：燃气泄漏时不主动切断灶台电源（继电器动作可能产生火花），所以 actions 里刻意没有 power_cut。"
+    },
+    "hood_temp": {
+      "atype": "排烟积热",
+      "message": "排烟罩温度异常",
+      "latch": true,
+      "actions": ["fan_on", "gas_valve_close"],
+      "by_profile": {
+        "business": {
+          "actions": ["voice_play"],
+          "latch": false,
+          "note": "营业档只预警，不动继电器——避免高峰打断出餐（04 文档 #2）。latch 也关掉：只播个语音却把通道锁住，人工还得跑去确认，属于给员工添活。"
+        },
+        "prep": {
+          "actions": ["fan_on", "gas_valve_close"]
+        },
+        "closed": {
+          "actions": ["fan_on", "gas_valve_close", "alarm_light_on"],
+          "ticket": "cleanup",
+          "note": "收档档无人值守：除了动作还要开清理工单（`ticket=cleanup`，落库在 A4）。加声光是因为这会儿没人在店里，只有声光能让次日进场的人一眼看到昨晚出过事。"
+        }
+      }
+    },
+    "sterilize_temp": {
+      "atype": "消毒柜超温",
+      "message": "消毒柜温度超出判定区间",
+      "latch": false,
+      "actions": ["alarm_light_on"]
+    },
+    "fridge_temp": {
+      "atype": "冷藏超温",
+      "message": "冷藏柜温度超上限（预警）",
+      "latch": false,
+      "actions": ["voice_play"],
+      "by_level": {
+        "2": {
+          "latch": true,
+          "message": "冷藏柜持续超温，已排除开门波动",
+          "actions": ["alarm_light_on", "voice_play"],
+          "ticket": "cold_chain"
+        }
+      },
+      "note": "level=1（瞬时越界）不算事故：开门、除霜、刚进的货都会瞬时越界，只播语音不闩锁不开单。level=2 是超上限持续 120 秒，且此前已由 safety/coldchain.py 滤掉开门波形；此时闩锁要人工确认，并开 cold_chain 工单。"
+    },
+    "freezer_temp": {
+      "atype": "冷冻超温",
+      "message": "冷冻柜温度超上限（预警）",
+      "latch": false,
+      "actions": ["voice_play"],
+      "by_level": {
+        "2": {
+          "latch": true,
+          "message": "冷冻柜持续超温，已排除开门波动",
+          "actions": ["alarm_light_on", "voice_play"],
+          "ticket": "cold_chain"
+        }
+      },
+      "note": "与冷藏同构。冷冻柜的后果更重（整柜报废），但确认时长不能缩短：冷冻柜开门后的回温同样在 2 分钟内完成，缩短只会让每一次补货都报警。"
+    },
+    "sample_temp": {
+      "atype": "留样柜超温",
+      "message": "留样柜温度超上限（预警）",
+      "latch": false,
+      "actions": ["voice_play"],
+      "by_level": {
+        "2": {
+          "message": "留样柜持续超温",
+          "actions": ["alarm_light_on", "voice_play"]
+        }
+      },
+      "note": "#6 只做柜温报警，48h 销毁任务在 A4。这里刻意不开工单、也不闩锁：留样柜超温要的是「当场听见」，不需要人工去确认某个通道——真正的处置是查柜子，不是按确认键。"
+    },
+    "t": {
+      "atype": "后厨温湿度",
+      "message": "环境温度超限",
+      "latch": false,
+      "actions": ["fan_on"],
+      "note": "#7 辅助展示：level=0，不进报警判定，只做「超限开排风」。它和 #1/#2 共用 CH2，由 safety/interlock.py 按「任一触发即开、全部恢复才关」合并——三路都恢复之后风机才停。"
+    },
+    "flame_b": {
+      "atype": "明火离人",
+      "message": "检测到明火且工位无人",
+      "latch": true,
+      "card_reset": true,
+      "actions": ["gas_valve_close", "power_cut", "alarm_light_on", "voice_play"],
+      "requires": [
+        {
+          "metric": "vision_no_person",
+          "op": ">",
+          "threshold": 0.5,
+          "label": "视觉判定无人"
+        }
+      ],
+      "note": "视觉侧信号由 ai_service 通过内部 topic 注入，不在 12 类遥测契约内（04 文档 #3 的 AND 条件）。card_reset=true：刷卡即「人回来了」，允许绕过「必须先回落」——燃气不声明这个属性，所以「气还在漏就按确认」依然被拒。"
+    }
+  }
+}

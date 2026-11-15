@@ -1,0 +1,65 @@
+<import src="../../templates/common.wxml"/>
+
+<view class="page page--bar">
+  <template wx:if="{{rows.length === 0}}" is="state-empty"
+            data="{{mark: '·', title: '购物车是空的', hint: '先去菜单挑几道菜吧', actionText: '去点菜'}}"/>
+
+  <block wx:else>
+    <view class="section"><view class="section-title">已选菜品</view>
+      <view class="section-hint" bindtap="clear">清空</view></view>
+
+    <view class="card">
+      <view wx:for="{{rows}}" wx:key="code" class="cart-row">
+        <view class="grow">
+          <view class="title">{{item.name}}</view>
+          <view class="muted" style="margin-top: 6rpx;">
+            {{item.category}} · 参考 {{item.estimate_minutes}} 分钟
+          </view>
+          <view class="caption" style="margin-top: 6rpx;" bindtap="remove" data-code="{{item.code}}">移除</view>
+        </view>
+        <view class="col" style="align-items: flex-end;">
+          <view class="price">￥{{item.subtotal_text}}</view>
+          <view class="stepper" style="margin-top: 12rpx;">
+            <view class="stepper__btn" bindtap="minus" data-code="{{item.code}}">－</view>
+            <view class="stepper__num">{{item.qty}}</view>
+            <view class="stepper__btn stepper__btn--primary" bindtap="plus" data-code="{{item.code}}">＋</view>
+          </view>
+        </view>
+      </view>
+    </view>
+
+    <view class="section"><view class="section-title">用餐信息</view></view>
+    <view class="card">
+      <picker mode="selector" range="{{tableLabels}}" value="{{tableIndex}}" bindchange="onTableChange">
+        <view class="list-link">
+          <view class="kv__k">桌台</view>
+          <view class="row gap-8"><text class="kv__v">{{tableLabels[tableIndex]}}</text><text class="arrow">›</text></view>
+        </view>
+      </picker>
+      <view class="list-link">
+        <view class="kv__k">合计</view>
+        <view class="kv__v price">￥{{summary.money_text}}</view>
+      </view>
+      <view class="list-link">
+        <view class="kv__k">参考时长</view>
+        <view class="kv__v num">{{summary.minutes}} 分钟</view>
+      </view>
+      <view class="caption" style="margin-top: 16rpx;">
+        参考时长按单道菜估算取最长值；实际出餐时间以下单后服务端的预计时刻为准。
+      </view>
+    </view>
+
+    <view class="card card--flat">
+      <view class="caption">
+        下单时会锁定当前价格与配方版本，已在制作的订单不会受后续改配方影响；
+        若某道菜刚好沽清，整单会被拒绝并列出菜名，购物车会保留供你调整。
+      </view>
+    </view>
+  </block>
+</view>
+
+<view wx:if="{{rows.length > 0}}" class="bottom-bar">
+  <view class="btn {{submitting ? 'disabled' : ''}} btn--block" bindtap="submit">
+    {{submitting ? '提交中…' : '确认下单 · ￥' + summary.money_text}}
+  </view>
+</view>

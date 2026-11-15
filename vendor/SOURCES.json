@@ -1,0 +1,223 @@
+{
+  "schema": 1,
+  "generated_at": "2026-11-12T08:34:28+00:00",
+  "files": {
+    "plugins/mingchu/drivers/dht11.py": {
+      "bundle": "sensor-drivers",
+      "zone": "PORT",
+      "sha256": "0ec6a3f4ccd80eb25d12f6458be5fa40f809ce205e671fbf2ee1605d436b158a",
+      "size": 1004,
+      "source": "plugins/mingchu/drivers/dht11.py",
+      "fetched_at": "2026-11-12T07:47:26+00:00"
+    },
+    "plugins/mingchu/drivers/mq2.py": {
+      "bundle": "sensor-drivers",
+      "zone": "PORT",
+      "sha256": "883493c5afb4fc66c88747c45f0bcb3957936a3c35755af8359abd3966c76e64",
+      "size": 587,
+      "source": "plugins/mingchu/drivers/mq2.py",
+      "fetched_at": "2026-11-12T07:47:26+00:00"
+    },
+    "kernel/db/__init__.py": {
+      "bundle": "readings-db",
+      "zone": "CORE",
+      "sha256": "8b084a9f378124b2b1a51563bf3c22444eb7ff33692017da28b2136ae56987ed",
+      "size": 24,
+      "source": "kernel/db/__init__.py",
+      "fetched_at": "2026-11-12T08:23:04+00:00"
+    },
+    "kernel/db/init_db.py": {
+      "bundle": "readings-db",
+      "zone": "CORE",
+      "sha256": "7bdc39cf3f9d798b929a0750b594674c77a0558576d495e08334e4bfed5ea2a7",
+      "size": 519,
+      "source": "kernel/db/init_db.py",
+      "fetched_at": "2026-11-12T08:23:04+00:00"
+    },
+    "kernel/db/migrate.py": {
+      "bundle": "readings-db",
+      "zone": "CORE",
+      "sha256": "ded4cf0788ceb66d598d487ac27548e10800cbdbd776c1d8684a79f94db6d12a",
+      "size": 27006,
+      "source": "kernel/db/migrate.py",
+      "fetched_at": "2026-11-12T08:23:04+00:00"
+    },
+    "kernel/db/models.py": {
+      "bundle": "readings-db",
+      "zone": "CORE",
+      "sha256": "8d6e098a2dacdebf486e21b5d6f1012251deedeab7a0d2981046c5aa08695439",
+      "size": 12935,
+      "source": "kernel/db/models.py",
+      "fetched_at": "2026-11-12T08:23:04+00:00"
+    },
+    "kernel/db/retention.py": {
+      "bundle": "readings-db",
+      "zone": "CORE",
+      "sha256": "4ec04fb9f53345311406bfce292c22dfed4ead0eb42c75ba62ec17d99fa41b1e",
+      "size": 8106,
+      "source": "kernel/db/retention.py",
+      "fetched_at": "2026-11-12T08:23:04+00:00"
+    },
+    "kernel/db/rollup.py": {
+      "bundle": "readings-db",
+      "zone": "CORE",
+      "sha256": "e8fb1a0287c748bb99fb208d2b92da3e3139fbd54e5d508fd20d3455f6d61b6a",
+      "size": 6997,
+      "source": "kernel/db/rollup.py",
+      "fetched_at": "2026-11-12T08:23:04+00:00"
+    },
+    "kernel/db/session.py": {
+      "bundle": "readings-db",
+      "zone": "CORE",
+      "sha256": "3ee1c75b8b5ac9a61288209fdb12cb45f42eb5f3fc0bbd2cca6c03c6468213a2",
+      "size": 469,
+      "source": "kernel/db/session.py",
+      "fetched_at": "2026-11-12T08:23:04+00:00"
+    },
+    "migrations/001_core.sql": {
+      "bundle": "readings-db",
+      "zone": "CORE",
+      "sha256": "940dac9cffd04425550b0fccca2607db9e2a70b57edd577e938befd98d871167",
+      "size": 705,
+      "source": "migrations/001_core.sql",
+      "fetched_at": "2026-11-12T08:23:04+00:00"
+    },
+    "migrations/002_alarm_rule_command.sql": {
+      "bundle": "readings-db",
+      "zone": "CORE",
+      "sha256": "0e437952e8a30adcbf0ffdb6516ebee1a0964eac8154d134f383aa852dab8594",
+      "size": 1421,
+      "source": "migrations/002_alarm_rule_command.sql",
+      "fetched_at": "2026-11-12T08:23:04+00:00"
+    },
+    "migrations/003_detector_events.sql": {
+      "bundle": "readings-db",
+      "zone": "CORE",
+      "sha256": "38d155d9b053d4bbe51a68b468e2735754335c6de5f00938540f6235af9e9175",
+      "size": 584,
+      "source": "migrations/003_detector_events.sql",
+      "fetched_at": "2026-11-12T08:23:04+00:00"
+    },
+    "migrations/004_llm_reports.sql": {
+      "bundle": "readings-db",
+      "zone": "CORE",
+      "sha256": "42e3656afc2efde6cb6c4c7d745364edb54881c4a8869b915ccbe403116fba36",
+      "size": 1219,
+      "source": "migrations/004_llm_reports.sql",
+      "fetched_at": "2026-11-12T08:23:04+00:00"
+    },
+    "migrations/005_auth_users.sql": {
+      "bundle": "readings-db",
+      "zone": "CORE",
+      "sha256": "bf1bc3b4d2fb400bbdd1119aae8cfb8d1e53d243db2c4049d05a243284084586",
+      "size": 558,
+      "source": "migrations/005_auth_users.sql",
+      "fetched_at": "2026-11-12T08:23:04+00:00"
+    },
+    "migrations/006_retention_index.sql": {
+      "bundle": "readings-db",
+      "zone": "CORE",
+      "sha256": "2914e4334f39535d7cb56eb13f8f3cfd281b23558a4846fafe1e2432a45767c1",
+      "size": 382,
+      "source": "migrations/006_retention_index.sql",
+      "fetched_at": "2026-11-12T08:23:04+00:00"
+    },
+    "migrations/007_audit_logs.sql": {
+      "bundle": "readings-db",
+      "zone": "CORE",
+      "sha256": "18e7d1d7d8361737e0630905f14a4f128b6ef70da8cef1f2b92e1ec96b29e7f9",
+      "size": 726,
+      "source": "migrations/007_audit_logs.sql",
+      "fetched_at": "2026-11-12T08:23:04+00:00"
+    },
+    "migrations/008_detector_event_uid.sql": {
+      "bundle": "readings-db",
+      "zone": "CORE",
+      "sha256": "74d2073babe7521ed0f3026b057fb2324265985f615c6aa647988450b5a0659a",
+      "size": 845,
+      "source": "migrations/008_detector_event_uid.sql",
+      "fetched_at": "2026-11-12T08:23:04+00:00"
+    },
+    "migrations/009_daily_briefs.sql": {
+      "bundle": "readings-db",
+      "zone": "CORE",
+      "sha256": "95478894ea1d1a8e8f331f4176e632095152933f590b44a0ab0f16c5a36f8d93",
+      "size": 669,
+      "source": "migrations/009_daily_briefs.sql",
+      "fetched_at": "2026-11-12T08:23:04+00:00"
+    },
+    "migrations/010_readings_rollup.sql": {
+      "bundle": "readings-db",
+      "zone": "CORE",
+      "sha256": "20442fb8f86226ac483391b13b68463bbccf223da4ef0e3ba391ffc1657c590f",
+      "size": 1375,
+      "source": "migrations/010_readings_rollup.sql",
+      "fetched_at": "2026-11-12T08:23:04+00:00"
+    },
+    "migrations/011_collation_unify.sql": {
+      "bundle": "readings-db",
+      "zone": "CORE",
+      "sha256": "77b3de9d8db911142a3153933bbf32165702a824c2688c826e78210d628ea410",
+      "size": 7666,
+      "source": "migrations/011_collation_unify.sql",
+      "fetched_at": "2026-11-12T08:23:04+00:00"
+    },
+    "migrations/012_command_source.sql": {
+      "bundle": "readings-db",
+      "zone": "CORE",
+      "sha256": "f084d935fd3338e830e101376d11b733b611fef5bf9d6c0f98e55a7e7db57ac7",
+      "size": 498,
+      "source": "migrations/012_command_source.sql",
+      "fetched_at": "2026-11-12T08:23:04+00:00"
+    },
+    "migrations/013_device_state.sql": {
+      "bundle": "readings-db",
+      "zone": "CORE",
+      "sha256": "dc766d8988429d9993a5d5251bf5f14f9a874e238b5dfabd09991b3da9c0b616",
+      "size": 500,
+      "source": "migrations/013_device_state.sql",
+      "fetched_at": "2026-11-12T08:23:04+00:00"
+    },
+    "migrations/014_kitchen_core.sql": {
+      "bundle": "readings-db",
+      "zone": "CORE",
+      "sha256": "753a6ce9b189f8c0d602a9b05c356ff9accdc4b09b0cec4dc67272624366dc31",
+      "size": 14504,
+      "source": "migrations/014_kitchen_core.sql",
+      "fetched_at": "2026-11-12T08:23:04+00:00"
+    },
+    "kernel/rules/__init__.py": {
+      "bundle": "rules-engine",
+      "zone": "ADAPT",
+      "sha256": "13369e62a49862d020cd37a2e0b6847dc140bdae370a52c8053fe1fc2e93d5a8",
+      "size": 100,
+      "source": "kernel/rules/__init__.py",
+      "fetched_at": "2026-11-12T08:34:28+00:00"
+    },
+    "kernel/rules/engine.py": {
+      "bundle": "rules-engine",
+      "zone": "ADAPT",
+      "sha256": "13a4e669c3de5eeede555762a8d33f9de09d779e45f32aca9fbb520f3b4ff024",
+      "size": 3901,
+      "source": "kernel/rules/engine.py",
+      "fetched_at": "2026-11-12T08:34:28+00:00"
+    },
+    "kernel/rules/loader.py": {
+      "bundle": "rules-engine",
+      "zone": "ADAPT",
+      "sha256": "9d3079f442645e97e0a23563d2f91bc3a71ae451fa6af37742746bce3a6ee220",
+      "size": 5043,
+      "source": "kernel/rules/loader.py",
+      "fetched_at": "2026-11-12T08:34:28+00:00"
+    },
+    "kernel/rules/model.py": {
+      "bundle": "rules-engine",
+      "zone": "ADAPT",
+      "sha256": "5229c5e6cd9c6b6de501497063e8175cd4bf9df89dd76fcd4cc57e43a51c690d",
+      "size": 1492,
+      "source": "kernel/rules/model.py",
+      "fetched_at": "2026-11-12T08:34:28+00:00"
+    }
+  },
+  "legacy_root": "D:\\liulan1\\毕设\\毕设项目\\02_项目代码\\proj"
+}

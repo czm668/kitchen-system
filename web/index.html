@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="dark light" />
+    <title>后厨智能调度与食安合规管理系统</title>
+  </head>
+  <body>
+    <!-- 首屏骨架：JS 还没下载完时先显示这个，避免白屏。
+         Vue 挂载后会被整体替换，所以这里只放纯 CSS 字体与底色。 -->
+    <div id="app">
+      <div class="boot">
+        <div class="boot-mark"></div>
+        <p>正在连接后厨设备…</p>
+      </div>
+    </div>
+    <!--
+      骨架屏样式**只允许作用于 .boot 自己**。
+      不能给 html/body 设置背景：这个 <style> 位于 body 中，比 <head> 里的主题
+      样式表晚加载，同权重选择器后者胜——body 的主题背景（var(--bg)）会被这里的
+      字面量永久覆盖，登录后主界面所有透明缝隙都会露出这套残留色（深浅主题串色、
+      缝隙发白的元凶）。Vue 挂载后 .boot 节点被替换，这里的样式随选择器一起失效。
+    -->
+    <style>
+      html, body { margin: 0; padding: 0; }
+      .boot {
+        height: 100vh; display: flex; flex-direction: column;
+        align-items: center; justify-content: center; gap: 18px;
+        font-family: system-ui, -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif;
+        background: #101114; color: #8a8f98; font-size: 13px; letter-spacing: .08em;
+      }
+      .boot-mark {
+        width: 34px; height: 34px; border-radius: 8px;
+        border: 2px solid #2a2e35; border-top-color: #8a8f98;
+        animation: boot-spin 900ms linear infinite;
+      }
+      @keyframes boot-spin { to { transform: rotate(360deg); } }
+    </style>
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>

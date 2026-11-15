@@ -1,0 +1,9 @@
+@import "../../templates/common.wxss";
+
+.cart-row {
+  display: flex; flex-direction: row; align-items: center;
+  padding: 22rpx 0;
+}
+.cart-row + .cart-row { border-top: 1rpx solid #e5e5ea; }
+.cart-row:first-child { padding-top: 0; }
+.cart-row:last-child { padding-bottom: 0; }

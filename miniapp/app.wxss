@@ -1,0 +1,186 @@
+/* 全局设计系统：与 Web 大屏同一套 Apple HIG 色板（浅色）
+   浅底深字、苹果蓝主色、语义色用 iOS 深色可读变体；
+   圆角 18rpx、多层柔和阴影代替实线边框、等宽数字避免跳动。
+   所有 var() 都带 fallback，低版本 WebView 不支持 CSS 变量也不至于白屏。 */
+page {
+  --bg: #f5f5f7;
+  --panel: #ffffff;
+  --panel-2: #f2f2f7;
+  --text: #1d1d1f;
+  --text-2: #6e6e73;
+  --text-3: #8e8e93;
+  --line: #e5e5ea;
+  --accent: #0071e3;
+  --green: #248a3d;
+  --orange: #b25d00;
+  --red: #d70015;
+  --radius: 18rpx;
+  --radius-sm: 8rpx;
+  --shadow: 0 1rpx 2rpx rgba(0,0,0,.04), 0 8rpx 24rpx rgba(0,0,0,.05), 0 20rpx 48rpx rgba(0,0,0,.03);
+
+  background: var(--bg, #f5f5f7);
+  color: var(--text, #1d1d1f);
+  font-size: 28rpx;
+  font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Helvetica Neue", sans-serif;
+  line-height: 1.5;
+}
+
+/* ---------------------------------------------------------------- 排版 */
+.h1 { font-size: 44rpx; font-weight: 700; letter-spacing: -0.5rpx; }
+.h2 { font-size: 34rpx; font-weight: 650; }
+.title { font-size: 30rpx; font-weight: 600; }
+.subtitle { font-size: 26rpx; color: var(--text-2, #6e6e73); }
+.muted { color: var(--text-2, #6e6e73); font-size: 24rpx; }
+.caption { color: var(--text-3, #8e8e93); font-size: 22rpx; }
+.num { font-variant-numeric: tabular-nums; font-feature-settings: "tnum"; }
+.price { color: var(--accent, #0071e3); font-weight: 650; font-variant-numeric: tabular-nums; }
+.price--muted { color: var(--text-2, #6e6e73); font-weight: 500; }
+.strong { font-weight: 600; }
+
+/* ---------------------------------------------------------------- 布局 */
+.page { min-height: 100vh; padding: 0 0 40rpx; box-sizing: border-box; }
+.page--bar { padding-bottom: 180rpx; }
+.section { margin: 32rpx 24rpx 16rpx; display: flex; align-items: baseline; justify-content: space-between; }
+.section-title { font-size: 30rpx; font-weight: 650; }
+.section-hint { font-size: 22rpx; color: var(--text-3, #8e8e93); }
+.row { display: flex; flex-direction: row; align-items: center; }
+.space-between { justify-content: space-between; }
+.between { justify-content: space-between; }
+.col { display: flex; flex-direction: column; }
+.grow { flex: 1; min-width: 0; }
+.gap-8 { gap: 8rpx; }
+.gap-12 { gap: 12rpx; }
+.gap-16 { gap: 16rpx; }
+.wrap { flex-wrap: wrap; }
+.center { justify-content: center; align-items: center; }
+
+/* ---------------------------------------------------------------- 卡片 */
+.card {
+  background: var(--panel, #fff);
+  border-radius: var(--radius, 18rpx);
+  margin: 16rpx 24rpx;
+  padding: 24rpx;
+  box-shadow: var(--shadow, 0 2rpx 12rpx rgba(0,0,0,.06));
+  border: 1rpx solid transparent;
+}
+.card--flat { box-shadow: none; background: var(--panel-2, #f2f2f7); }
+.card--tap:active { opacity: .72; }
+.card + .card { margin-top: 24rpx; }
+.divider { height: 1rpx; background: var(--line, #e5e5ea); margin: 20rpx 0; }
+
+/* ---------------------------------------------------------------- 徽标 */
+.badge {
+  display: inline-block;
+  background: var(--panel-2, #f2f2f7);
+  color: var(--text-2, #6e6e73);
+  border-radius: 999rpx;
+  font-size: 22rpx;
+  padding: 6rpx 16rpx;
+  line-height: 1.4;
+}
+.badge.ok { background: rgba(36,138,61,.10); color: var(--green, #248a3d); }
+.badge.warn { background: rgba(178,93,0,.10); color: var(--orange, #b25d00); }
+.badge.danger { background: rgba(215,0,21,.10); color: var(--red, #d70015); }
+.badge.info { background: rgba(0,113,227,.10); color: var(--accent, #0071e3); }
+.badge.plain { background: var(--panel-2, #f2f2f7); color: var(--text-2, #6e6e73); }
+/* 旧页面曾用 .badge.warn 表示沽清、.badge.ok 表示可点，语义不变 */
+.badge--sm { font-size: 20rpx; padding: 4rpx 12rpx; }
+
+/* ---------------------------------------------------------------- 按钮 */
+.btn {
+  background: var(--accent, #0071e3);
+  color: #fff;
+  border-radius: 14rpx;
+  font-size: 28rpx;
+  font-weight: 600;
+  padding: 20rpx 0;
+  text-align: center;
+  line-height: 1.4;
+}
+.btn:active { opacity: .8; }
+.btn.ghost { background: var(--panel, #fff); color: var(--accent, #0071e3); border: 1rpx solid rgba(0,113,227,.35); }
+.btn.subtle { background: var(--panel-2, #f2f2f7); color: var(--text, #1d1d1f); border: 1rpx solid transparent; }
+.btn.danger { background: rgba(215,0,21,.08); color: var(--red, #d70015); }
+.btn.disabled { background: var(--panel-2, #f2f2f7); color: var(--text-3, #8e8e93); border-color: transparent; }
+.btn--sm { padding: 12rpx 24rpx; font-size: 24rpx; border-radius: 12rpx; }
+.btn--block { width: 100%; }
+.btn--round { border-radius: 999rpx; }
+
+/* ---------------------------------------------------------------- 表单 */
+.input {
+  background: var(--panel-2, #f2f2f7);
+  border-radius: 14rpx;
+  padding: 18rpx 24rpx;
+  font-size: 28rpx;
+  color: var(--text, #1d1d1f);
+}
+.search { display: flex; align-items: center; background: var(--panel-2, #f2f2f7); border-radius: 14rpx; padding: 0 20rpx; height: 72rpx; }
+.search .input { flex: 1; background: transparent; padding: 0 12rpx; }
+.chip {
+  flex-shrink: 0;
+  padding: 12rpx 28rpx;
+  border-radius: 999rpx;
+  background: var(--panel, #fff);
+  color: var(--text-2, #6e6e73);
+  font-size: 26rpx;
+  box-shadow: 0 1rpx 4rpx rgba(0,0,0,.04);
+}
+.chip.active { background: var(--accent, #0071e3); color: #fff; font-weight: 600; }
+.chips { display: flex; flex-direction: row; gap: 14rpx; padding: 4rpx 24rpx 8rpx; white-space: nowrap; }
+.stepper { display: flex; align-items: center; gap: 18rpx; }
+.stepper__btn {
+  width: 52rpx; height: 52rpx; line-height: 48rpx; text-align: center;
+  border-radius: 50%; background: var(--panel-2, #f2f2f7);
+  color: var(--accent, #0071e3); font-size: 32rpx; font-weight: 600;
+}
+.stepper__btn--primary { background: var(--accent, #0071e3); color: #fff; }
+.stepper__num { min-width: 40rpx; text-align: center; font-variant-numeric: tabular-nums; font-weight: 600; }
+
+/* ---------------------------------------------------------------- 进度 */
+.progress { height: 10rpx; border-radius: 999rpx; background: var(--panel-2, #f2f2f7); overflow: hidden; }
+.progress__fill { height: 100%; border-radius: 999rpx; background: var(--accent, #0071e3); transition: width .35s ease; }
+.progress__fill--ok { background: var(--green, #248a3d); }
+.steps { display: flex; flex-direction: row; justify-content: space-between; margin-top: 12rpx; }
+.steps__item { font-size: 20rpx; color: var(--text-3, #8e8e93); }
+.steps__item--on { color: var(--accent, #0071e3); font-weight: 600; }
+.dot { width: 12rpx; height: 12rpx; border-radius: 50%; background: var(--line, #e5e5ea); }
+.dot--ok { background: var(--green, #248a3d); }
+.dot--warn { background: var(--orange, #b25d00); }
+.dot--info { background: var(--accent, #0071e3); }
+
+/* ---------------------------------------------------------------- 列表 */
+.kv { display: flex; justify-content: space-between; padding: 12rpx 0; font-size: 26rpx; }
+.kv__k { color: var(--text-2, #6e6e73); }
+.kv__v { color: var(--text, #1d1d1f); font-weight: 500; }
+.list-link { display: flex; align-items: center; justify-content: space-between; padding: 26rpx 0; }
+.list-link + .list-link { border-top: 1rpx solid var(--line, #e5e5ea); }
+.arrow { color: var(--text-3, #8e8e93); font-size: 26rpx; }
+
+/* ---------------------------------------------------------------- 底部栏 / 空态 */
+.bottom-bar {
+  position: fixed; left: 0; right: 0; bottom: 0;
+  background: rgba(255,255,255,.96);
+  padding: 20rpx 24rpx calc(20rpx + env(safe-area-inset-bottom));
+  box-shadow: 0 -1rpx 0 rgba(0,0,0,.05), 0 -12rpx 32rpx rgba(0,0,0,.05);
+}
+.cartbar { /* 兼容旧页面类名 */
+  position: fixed; left: 0; right: 0; bottom: 0;
+  background: #fff; padding: 20rpx 24rpx calc(20rpx + env(safe-area-inset-bottom));
+  box-shadow: 0 -4rpx 16rpx rgba(0,0,0,.08);
+}
+.empty-card { text-align: center; padding: 80rpx 24rpx; }
+.empty-card__title { font-size: 30rpx; font-weight: 600; margin-top: 20rpx; }
+.empty-card__hint { font-size: 24rpx; color: var(--text-2, #6e6e73); margin-top: 12rpx; }
+.empty-card__mark {
+  width: 96rpx; height: 96rpx; margin: 0 auto; border-radius: 50%;
+  background: var(--panel-2, #f2f2f7); display: flex; align-items: center; justify-content: center;
+  color: var(--text-3, #8e8e93); font-size: 40rpx;
+}
+
+/* 骨架屏：只做透明度呼吸，不用 translate（避免原生组件层错位） */
+.skeleton-line { height: 24rpx; border-radius: 8rpx; background: var(--panel-2, #f2f2f7); margin: 14rpx 0; animation: breathe 1.4s ease-in-out infinite; }
+.skeleton-line--short { width: 40%; }
+.skeleton-line--mid { width: 70%; }
+@keyframes breathe { 0%, 100% { opacity: 1; } 50% { opacity: .45; } }
+.fade-in { animation: fade-in .28s ease both; }
+@keyframes fade-in { from { opacity: 0; } to { opacity: 1; } }

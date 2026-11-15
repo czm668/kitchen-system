@@ -1,0 +1,72 @@
+{
+  "scenario": "kitchen",
+  "name": "基于 ESP32 的后厨智能调度与食安合规管理系统（P0 骨架）",
+  "version": "0.1.0",
+  "metrics": [
+    {"id": "t", "label": "后厨环境温度", "unit": "°C", "aliases": ["temp", "temperature", "env"]},
+    {"id": "h", "label": "后厨环境湿度", "unit": "%RH", "aliases": ["humidity"]},
+    {"id": "gas_level", "label": "燃气浓度（MQ-2 ADC 归一化）", "unit": "0~1", "aliases": ["gas", "mq2"]},
+    {"id": "hood_temp", "label": "排烟罩温度（MAX6675 CH1）", "unit": "°C", "aliases": ["hood"]},
+    {"id": "sterilize_temp", "label": "消毒柜温度（MAX6675 CH2）", "unit": "°C", "aliases": ["sterilize"]},
+    {"id": "fridge_temp", "label": "冷藏柜温度（DS18B20 #1）", "unit": "°C"},
+    {"id": "freezer_temp", "label": "冷冻柜温度（DS18B20 #2）", "unit": "°C"},
+    {"id": "sample_temp", "label": "留样柜温度（DS18B20 #3）", "unit": "°C"},
+    {"id": "flame_a", "label": "A 工位明火", "kind": "bool",
+     "true_label": "有明火", "false_label": "无明火"},
+    {"id": "flame_b", "label": "B 工位明火", "kind": "bool",
+     "true_label": "有明火", "false_label": "无明火"},
+    {"id": "sct_current", "label": "运行电流（SCT-013）", "unit": "A", "aliases": ["current"]},
+    {"id": "weight_g", "label": "称重值（HX711）", "unit": "g", "aliases": ["weight"]}
+  ],
+  "devices": [
+    {"id": "kitchen-node-01", "name": "后厨感知/执行主节点（A/B 虚拟工位共享一套采集）",
+     "dtype": "controller",
+     "drivers": ["ambient", "gas", "thermal", "coldchain", "flame", "current",
+                 "scale", "relay3ch", "signal"]}
+  ],
+  "atype_labels": {
+    "gas": "燃气泄漏", "heat": "排烟积热", "flame": "明火离人", "cold": "冷链异常",
+    "interlock": "互锁", "power": "工位电源", "hygiene": "着装/行为违规",
+    "order": "订单调度", "workorder": "工单", "access": "人员准入",
+    "process": "过程执行", "offline": "设备离线"
+  },
+  "drivers": [
+    {"id": "ambient", "class": "kitchen.drivers.sensors:AmbientDriver",
+     "topic": "tele/env", "metrics": ["t", "h"]},
+    {"id": "gas", "class": "kitchen.drivers.sensors:GasDriver",
+     "topic": "tele/gas", "metrics": ["gas_level"]},
+    {"id": "thermal", "class": "kitchen.drivers.sensors:ThermalDriver",
+     "topic": "tele/thermal", "metrics": ["hood_temp", "sterilize_temp"]},
+    {"id": "coldchain", "class": "kitchen.drivers.sensors:ColdchainDriver",
+     "topic": "tele/cold", "metrics": ["fridge_temp", "freezer_temp", "sample_temp"]},
+    {"id": "flame", "class": "kitchen.drivers.sensors:FlameDriver",
+     "topic": "tele/flame", "metrics": ["flame_a", "flame_b"]},
+    {"id": "current", "class": "kitchen.drivers.sensors:CurrentDriver",
+     "topic": "tele/current", "metrics": ["sct_current"]},
+    {"id": "scale", "class": "kitchen.drivers.sensors:ScaleDriver",
+     "topic": "tele/weight", "metrics": ["weight_g"]},
+    {"id": "relay3ch", "class": "kitchen.drivers.actuators:Relay3ChDriver",
+     "actions": ["gas_valve_close", "gas_valve_open", "fan_on", "fan_off",
+                 "power_cut", "power_restore"],
+     "states": {
+       "gas_valve_close": {"gas_valve": "closed"},
+       "gas_valve_open": {"gas_valve": "open"},
+       "fan_on": {"fan": "on"},
+       "fan_off": {"fan": "off"},
+       "power_cut": {"station_power": "cut"},
+       "power_restore": {"station_power": "on"}
+     }},
+    {"id": "signal", "class": "kitchen.drivers.actuators:SignalDriver",
+     "actions": ["alarm_light_on", "alarm_light_off", "voice_play"],
+     "states": {
+       "alarm_light_on": {"alarm_light": "on"},
+       "alarm_light_off": {"alarm_light": "off"},
+       "voice_play": {"voice": "played"}
+     }}
+  ],
+  "detectors": [],
+  "zones": [],
+  "skills": [],
+  "ui": {"widgets": ["env-chart", "device-control", "alarm", "interlock"]},
+  "rules": []
+}

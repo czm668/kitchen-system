@@ -1,0 +1,80 @@
+<import src="../../templates/common.wxml"/>
+
+<view class="page">
+  <view class="card">
+    <view class="row gap-12">
+      <input class="input grow" value="{{code}}" bindinput="onInput"
+             placeholder="输入溯源码（TC-…）" confirm-type="search" bindconfirm="submit" />
+      <view class="btn" style="width: 140rpx;" bindtap="submit">查询</view>
+    </view>
+    <view class="btn ghost btn--block" style="margin-top: 20rpx;" bindtap="scan">扫一扫餐盘标签</view>
+  </view>
+
+  <view wx:if="{{history.length}}" class="card">
+    <view class="row between">
+      <view class="section-title" style="margin: 0;">最近查询</view>
+      <view class="caption" bindtap="clearHistory">清除</view>
+    </view>
+    <view wx:for="{{history}}" wx:key="code" class="list-link" bindtap="queryFromHistory" data-code="{{item.code}}">
+      <view class="grow">
+        <view class="title">{{item.code}}</view>
+        <view class="caption">{{item.dish || '未标菜品'}} · {{historyTexts[item.code]}}</view>
+      </view>
+      <text class="arrow">›</text>
+    </view>
+  </view>
+
+  <template wx:if="{{loading}}" is="state-loading" data="{{}}"/>
+  <view wx:if="{{error}}" class="card">
+    <view class="empty-card__title">查询失败</view>
+    <view class="empty-card__hint">{{error}}</view>
+    <view wx:if="{{code}}" class="btn ghost btn--sm" style="margin: 28rpx auto 0; width: 240rpx;" bindtap="retry">重试</view>
+  </view>
+
+  <block wx:if="{{view}}">
+    <view class="card fade-in">
+      <view class="row between">
+        <view class="h2">{{view.dish || '未知菜品'}}</view>
+        <view class="badge {{view.expired ? 'danger' : 'ok'}}">
+          {{view.expired ? '已过保质期' : '保质期内'}}
+        </view>
+      </view>
+      <view class="divider"></view>
+
+      <view class="row" style="align-items: flex-start;">
+        <view class="qr-box">
+          <image wx:if="{{!labelFailed}}" src="{{labelUrl}}" mode="aspectFit"
+                 class="qr-img" binderror="onImageError" />
+          <view wx:else class="qr-fallback caption">标签图加载失败<br/>请检查服务地址</view>
+        </view>
+        <view class="grow" style="margin-left: 24rpx;">
+          <view class="kv"><text class="kv__k">溯源码</text>
+            <text class="kv__v" bindtap="copyCode">{{view.code}} ⧉</text></view>
+          <view class="kv"><text class="kv__k">批次</text><text class="kv__v">{{view.batch_no || '—'}}</text></view>
+          <view class="kv"><text class="kv__k">生产</text><text class="kv__v num">{{view.produce_text}}</text></view>
+          <view class="kv"><text class="kv__k">到期</text><text class="kv__v num">{{view.expire_text}}</text></view>
+        </view>
+      </view>
+    </view>
+
+    <view class="card">
+      <view class="section-title" style="margin-bottom: 12rpx;">供应商与资质</view>
+      <view class="kv"><text class="kv__k">供应商</text>
+        <text class="kv__v">{{view.supplier || '未登记（追溯链不完整）'}}</text></view>
+      <view class="kv"><text class="kv__k">许可证号</text>
+        <text class="kv__v">{{view.license_no || '未登记'}}</text></view>
+      <view class="kv"><text class="kv__k">资质状态</text>
+        <text class="kv__v">{{view.qualification_text}}</text></view>
+    </view>
+
+    <view wx:if="{{view.hasInspection}}" class="card">
+      <view class="section-title" style="margin-bottom: 12rpx;">检测记录</view>
+      <view wx:for="{{view.inspectionRows}}" wx:key="key" class="kv">
+        <text class="kv__k">{{item.key}}</text><text class="kv__v">{{item.value}}</text>
+      </view>
+    </view>
+    <view wx:else class="card card--flat">
+      <view class="caption">这批菜还没有登记检测记录。溯源链以批次与供应商信息为准。</view>
+    </view>
+  </block>
+</view>

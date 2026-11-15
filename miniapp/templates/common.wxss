@@ -1,0 +1,3 @@
+/* 三态模板样式。页面 wxss 里 @import "../../templates/common.wxss";
+   大部分类已在 app.wxss 全局定义，这里只放模板专属的微调。 */
+.empty-card__hint { max-width: 520rpx; margin-left: auto; margin-right: auto; word-break: break-all; }

@@ -1,0 +1,18 @@
+[project]
+name = "kitchen-system"
+version = "0.1.0"
+description = "基于 ESP32 的后厨智能调度与食安合规管理系统 - 新选题独立工程"
+requires-python = ">=3.11"
+dependencies = []
+
+[project.optional-dependencies]
+test = ["pytest>=7.0"]
+# A2 MQTT 真链路：不装也能跑（Inproc 进程内通道覆盖全部代码路径），
+# 演示真 broker 用 `--amqtt`（内嵌）或 `--broker host:port`（EMQX 等）
+mqtt = ["paho-mqtt>=2.0", "amqtt>=0.11"]
+
+[tool.pytest.ini_options]
+# 业务代码只在 src/ 下；vendor/ 是只读素材落点，不进 import 路径。
+pythonpath = ["src", "."]
+testpaths = ["tests"]
+addopts = "--capture=sys -q"

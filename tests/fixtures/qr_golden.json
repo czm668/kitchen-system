@@ -1,0 +1,179 @@
+{
+  "note": "满容量用例的矩阵哈希由 segno 逐掩码比对确认（外部真值）；回归用例锁本实现行为。重建方式见 tools/qr_bench.py。",
+  "exact_capacity": [
+    {
+      "version": 1,
+      "payload": "https://k.exam",
+      "masks": [
+        "2d01cee0b5a1d7aab5b2824094332191abb16890b1909fefb004cb823a6a8df3",
+        "f4376ad803191a4166c716a545c167570e2815988a4e0f6990232ba93b8182bb",
+        "07c20c9ae52c805eb58a858cec377cc8a8008cf3b441116ddabdae3acb453885",
+        "46d5739a22a009dc67c1455631351b4e0675476899d22d049a977531aa0c4f4e",
+        "4a1a16447cfab29062376c697abe889cbc5a4b2bb09aa5bc182e6a10b033b030",
+        "6f5a8704b37d81d77febe720cbb79d430b7423c8d2db625e71c8d0646f483472",
+        "1cc74b1992ba38c400d110aeb8688866d0e49b02bf8cf528ba956e4b732b6332",
+        "1b5c0f1f17d338af139196c5b81a6a1d3f4a64587e61414a4e3af4d014c540b9"
+      ]
+    },
+    {
+      "version": 2,
+      "payload": "https://k.example.com/t/TC",
+      "masks": [
+        "b7698d529f4da3ce74bb08ac5aa69e9f29b1ef04f9d46c8a2cbc578103b01590",
+        "aeccaa3b52040bef05e050191eba29f5ec4c5847cb287d26ad018800f546c164",
+        "ef9b03831e616a865ce37f7b63f23d65d24a290bdadf316547295c3bfba1320f",
+        "199857cc528d4cefcc383558a1547176b558de0e5b0fa359d462a3a04d6e11ab",
+        "9d14dfb41ea54f830cb338bb2ec0e019e7a2ae42a8ca07a10827f03f79079567",
+        "1a4c587238c207d0997fff624872c95fd06f308e02cae5dc9d143522fad926cc",
+        "659956958f857996f4f67dd6e8f1fcc39080261ea8a9c2871ba56e176966b80e",
+        "d82df78a7b7fbbae3b1ffe38cf537dddd2253d202f9b90dd8f79f1b081810067"
+      ]
+    },
+    {
+      "version": 3,
+      "payload": "https://k.example.com/t/TC-DEMO-0001?dish=",
+      "masks": [
+        "b94a46f4c7e152b076e044d96019913c5391b453364427a9fbe754f6c952b685",
+        "5727787623a1adb673970f22dfd94a5ab8059431c576e13d96cd787e130bdb3e",
+        "088e288491a24761c6d2b4777b42f514ca26d34c5fa86cb9a2d8e4b13f936c54",
+        "e2e83727d86bf3aa18333be869661ad4bccfd696590de4bf9a3eb8b4702855e8",
+        "adfe2c3c708f2a4ac89fa5cbb3fe4f9c56f0086fb0bad9039a92126112ccf544",
+        "36b5a1f323483f7836cd3f44d6d7ec549fdbff311fce6caae005cde139668178",
+        "2c3925d8882eb0de9597689e140dc965312e5c57912e8a72cc8f4e91f193378f",
+        "f145537ce3c557a991f1f9f4139aab3141622adb8264aa142f5c190ec18a64cc"
+      ]
+    },
+    {
+      "version": 4,
+      "payload": "https://k.example.com/t/TC-DEMO-0001?dish=1&batch=B-DEMO-001ht",
+      "masks": [
+        "9dae4335ef98ff19cb50d6022d8a9028e4f3c2a6a13f163a3cbbd92ae6ea476f",
+        "049b271e027d80c64a730437f09167c6dcc5c45161ad17b94eeaee741c509925",
+        "84d4c44c9e9ca262653486fe4c264b8e27ba4c7eb4d2c94dc41500bb20b00131",
+        "be770efcbd70abcf564721eb3d8585f29e207870692e3c5e6981c997229241d0",
+        "627b829d7f02bd076ea726b56c070afefdfdc12ce7739a488a80bb13509ac075",
+        "2847a7400f9071655bca5f95fd2ca89b0c3e8d0d9837c1abb67b3cf9b49d4abe",
+        "a0af009cb37e5172fbb1bfc6389e8e727e02a2e97900f5743fb8dc5ca272e50b",
+        "fba4c2408ca75c0ad0e28a61eb18ff5acad9c91d560c9346e98248057063050b"
+      ]
+    },
+    {
+      "version": 5,
+      "payload": "https://k.example.com/t/TC-DEMO-0001?dish=1&batch=B-DEMO-001https://k.example.com/t/",
+      "masks": [
+        "09f98936fc4f5d41e8ef81c7b44ad2065fa70eb2066ec0af681e96dc37593e38",
+        "e410fdf03cbe7cc85fed2dbc8787c2a43d70a410144cba4745216ac96e33f1f0",
+        "bc627b5580a434ce02d7ce2bb39d723afc6679a2932dcce68b7451ebc1124c0a",
+        "8bbf100af164945508fe6374c6f548c857d036069e1a3273347a3ea02de55d2e",
+        "44b74bfeb9dea2ba624d381181c0bf0166e5172fc0c40a310471d32a78862b98",
+        "f184706ec92b000db0204522081d86de26436228d6a5ca3893540d41d854062c",
+        "fe25131be957ab3ca80a759090fbb668bb0b4fb6799b9d5fa002961d9defd3fc",
+        "f20b205b9719752be29bf9b258048e6bd2f2e50f8d90e0515b3a4201699ea456"
+      ]
+    },
+    {
+      "version": 6,
+      "payload": "https://k.example.com/t/TC-DEMO-0001?dish=1&batch=B-DEMO-001https://k.example.com/t/TC-DEMO-0001?dish=1&ba",
+      "masks": [
+        "580d67648ec0c94e35ea29ea9b63d330f55e9541d9b53e2e0c14f5677264ee94",
+        "b8a62c3d5380707de2a8a9819f45c9bbdaa3bf230baa43deb0889f8d81bdcbca",
+        "01e40ee80adcb4f418d46064125082419ccdded51a1a78a4af2b98899820df6d",
+        "a4524e5206c708d020638bebf92b00a8ec3b89dfc3ad2b0738789723d0eb8ddc",
+        "c6391fb81ebab2a5c803c8d2c688c32c83e038c49947b117752f506aaebf0096",
+        "c6dbaa9382550f20dfc2be1fc18c4a50425e25c6a6520eba1faa1d0565599d38",
+        "75beef1d35d1569c7e00a84860864916f3a398f681eabbef3270e52170670c5c",
+        "6b7b650714ca8dedc87806ee56d3993003b01e44e09dadffa5e4c3ddf638ef89"
+      ]
+    },
+    {
+      "version": 7,
+      "payload": "https://k.example.com/t/TC-DEMO-0001?dish=1&batch=B-DEMO-001https://k.example.com/t/TC-DEMO-0001?dish=1&batch=B-DEMO-001ht",
+      "masks": [
+        "524156f0061ac8f3fdfc830abf4c6ac1c813d1b3d1e2a2df63def2c37361c36a",
+        "38ffd733656e8283c8c8c94e5d7cc463253d08d2bb8da8516f6bebd4af876032",
+        "6a14b88bd6bf7420f0edb0e2586468178753cb0227277bedc13ed61fc6a4a22b",
+        "d9579d79089122fc2fa4e2d78d91c9712ea07101d8fa3c734649746ebf597546",
+        "e041442467fb0037e731ce77ed3b7b26a02141d4f8c04922a25b37795df39450",
+        "81b04f71efeb55f92f9b93a9ecac9a7490c7f3a074cfd4ed4353362f4887fcf3",
+        "ad046fcac8472cafc89fee52fdaae3b0d3a286b6e3432b27ccdb988c92bf4ff4",
+        "11f40672ba070b2ae37cc3127b8fe7935d5ff5c1b59ba2ed20d8d122d9386fa9"
+      ]
+    },
+    {
+      "version": 8,
+      "payload": "https://k.example.com/t/TC-DEMO-0001?dish=1&batch=B-DEMO-001https://k.example.com/t/TC-DEMO-0001?dish=1&batch=B-DEMO-001https://k.example.com/t/TC-DEMO-",
+      "masks": [
+        "bec4ca31f2617516ea5852dd90da17c679f096078a686b702db0a7f7c0952792",
+        "3626011d32bc8a195dae57bbc319becdceb9dd104e70f455d79b438dcc3ca5a4",
+        "7134dc7f042be289435003fd568b5b15ed52652776017fca375fc8ec04f6e921",
+        "f580bbb8e9ea9b7cd2836ee3460dc6ceac78b41ef9efe3a933d27819940a9431",
+        "24d5d6309413b809723df1b3895ba0b6984411286650a4fa6417c84ea3dc907f",
+        "b7c36f1225c0de90f0abad1577d4a5d384d0b71cb96f02576d84a5a4e1523b63",
+        "41966644c0e5d528992f94519289d6aec492f6ed8bb52fb46d91dc0868a44675",
+        "0637711b384c0624a809e20c1fbbb2d47ee20682f1991acf64ac33a74fc1edcf"
+      ]
+    },
+    {
+      "version": 9,
+      "payload": "https://k.example.com/t/TC-DEMO-0001?dish=1&batch=B-DEMO-001https://k.example.com/t/TC-DEMO-0001?dish=1&batch=B-DEMO-001https://k.example.com/t/TC-DEMO-0001?dish=1&batch=B-DEMO-001",
+      "masks": [
+        "ac84275b6a3912625c2bda6ad1b027b04958c5721af1680ec73621cbf6e3f9bb",
+        "3dddcabc8bedf20e3bf1315f5abea45476547ea960c8188a766935fbac963630",
+        "3a5bb52aada9aa490266cf8c7cd6d0c73d052ad27be1ada5b5926fcfd6d3f251",
+        "94acb7ac822578020be20649a36cd6bcf90b4e5ad614bfc7ac47be784fe0f7aa",
+        "bd41b4a01aff111e40ba611baded92fe97c3b1015da3ab770bb1c00544268ce5",
+        "0bf278d83bcc23190892d54cd92d0b0a89c9f62e24e3448022cd352f2f936e6e",
+        "1f9a73a1c507b23dd98097d74652d64425c34c23d672f60d0e50c10875964a97",
+        "06acc0dfc1f2e53e859462aa1d945be2869fe2616d651e158fb9d87a6252fa60"
+      ]
+    },
+    {
+      "version": 10,
+      "payload": "https://k.example.com/t/TC-DEMO-0001?dish=1&batch=B-DEMO-001https://k.example.com/t/TC-DEMO-0001?dish=1&batch=B-DEMO-001https://k.example.com/t/TC-DEMO-0001?dish=1&batch=B-DEMO-001https://k.example.com/t/TC-DEMO-0",
+      "masks": [
+        "55d3a4a2feb8061fbad38a0eea4d9be8100c7fd2e97580de8d94028163fe95f4",
+        "23dbb008f3a4f04c2c217d99e71bbc2938469cfb54aa3f50a9213d5634a9c8d7",
+        "bcef81bbe851aa45ec0bcf33c4393c78df2f4d1a40273fd1f322da5e39ae1d9a",
+        "bb28c79dfd7fab0ddfce843c6f9188d91fdcaaa57d661855fc677fe84676c0bd",
+        "9f8cfe5b2fa90c7e7b6a4aaea324cffd2b3f9be67275d82e8eb24917d8098719",
+        "d07e3b845d151811c86fca0375d68e3f39c8cabb79203e8110bd119062c41c8a",
+        "b62211cc984fce9b4e680e75c6147408d8787a0a57d319dccea6bab6ba9a9838",
+        "8ec7f2feb614d442bf125488d6b6fb267a7bc77523473d7c29a730f63f3e1b73"
+      ]
+    }
+  ],
+  "regression": [
+    {
+      "text": "https://k.example.com/t/TC-DEMO-0001",
+      "version": 3,
+      "mask": 3,
+      "size": 29,
+      "sha256": "77612aade2ac4fab400a788dd6c017f23dd72924ee610c3a219fcfc258bf5394",
+      "note": "真实溯源短链"
+    },
+    {
+      "text": "TC-DEMO-0001",
+      "version": 1,
+      "mask": 2,
+      "size": 21,
+      "sha256": "ed4ab394a48acb653764b665ff49f3bc9c198eb2d7887aebd27de47ecb57ea5f",
+      "note": "只放溯源码本体"
+    },
+    {
+      "text": "http://192.168.1.20:8000/trace?code=TC-DEMO-0001",
+      "version": 4,
+      "mask": 2,
+      "size": 33,
+      "sha256": "dae7fdf74e389aa6877131e5b64a7311363795f883f0f83e608b41d109534cc7",
+      "note": "局域网部署"
+    },
+    {
+      "text": "青椒肉丝 B-DEMO-001 鲜丰肉联厂",
+      "version": 3,
+      "mask": 6,
+      "size": 29,
+      "sha256": "4184266d0108c303bc1727c834219560cad8cef911362a5c5c11801bf639f088",
+      "note": "中文标签（UTF-8 多字节）"
+    }
+  ]
+}

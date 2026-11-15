@@ -1,0 +1,89 @@
+<import src="../../templates/common.wxml"/>
+
+<view class="page">
+  <view class="card">
+    <view class="row gap-16">
+      <view class="avatar num">{{tableIndex + 1}}</view>
+      <view class="grow">
+        <view class="h2">{{tableLabels[tableIndex]}} · 顾客 {{customerRef}}</view>
+        <view class="caption" style="margin-top: 6rpx;">匿名会话 {{tokenShort}}，不含姓名与手机号</view>
+      </view>
+      <view class="badge {{probeState === 'ok' ? 'ok' : (probeState === 'fail' ? 'danger' : 'plain')}}">
+        {{probeState === 'ok' ? '在线' : (probeState === 'fail' ? '离线' : '检测中')}}
+      </view>
+    </view>
+  </view>
+
+  <view class="section"><view class="section-title">用餐设置</view></view>
+  <view class="card">
+    <picker mode="selector" range="{{tableLabels}}" value="{{tableIndex}}" bindchange="onTableChange">
+      <view class="list-link">
+        <view class="kv__k">桌台</view>
+        <view class="row gap-8"><text class="kv__v">{{tableLabels[tableIndex]}}</text><text class="arrow">›</text></view>
+      </view>
+    </picker>
+    <view class="list-link" bindtap="goNotifications">
+      <view class="kv__k">消息中心</view>
+      <view class="row gap-8">
+        <text wx:if="{{unread > 0}}" class="badge danger badge--sm num">{{unread}} 未读</text>
+        <text class="arrow">›</text>
+      </view>
+    </view>
+    <view class="list-link" bindtap="goOrders">
+      <view class="kv__k">我的订单</view><text class="arrow">›</text>
+    </view>
+    <view class="list-link" bindtap="goService">
+      <view class="kv__k">智能客服与客诉</view>
+      <view class="row gap-8">
+        <text class="kv__v">AI 受理 · 进度查询</text><text class="arrow">›</text>
+      </view>
+    </view>
+    <view class="list-link" bindtap="goTrace">
+      <view class="kv__k">食品溯源</view><text class="arrow">›</text>
+    </view>
+  </view>
+
+  <view class="section"><view class="section-title">连接与数据</view></view>
+  <view class="card">
+    <view class="list-link" bindtap="probe">
+      <view class="col grow">
+        <view class="kv__v">服务连通性</view>
+        <view class="caption" style="margin-top: 6rpx;">{{probeText}}</view>
+      </view>
+      <text class="arrow">↻</text>
+    </view>
+    <view class="list-link" bindtap="copyBaseUrl">
+      <view class="col grow">
+        <view class="kv__v">服务地址</view>
+        <view class="caption" style="margin-top: 6rpx;">{{baseUrl}}（点击复制）</view>
+      </view>
+      <text class="arrow">⧉</text>
+    </view>
+    <view class="list-link" bindtap="reopen">
+      <view class="kv__k">重新开桌</view><text class="arrow">›</text>
+    </view>
+    <view class="list-link" bindtap="clearCache">
+      <view class="kv__k">清理本机缓存</view><text class="arrow">›</text>
+    </view>
+  </view>
+
+  <view class="card card--flat">
+    <view class="section-title">关于账号与订单归属</view>
+    <view class="caption" style="margin-top: 12rpx;">
+      扫码点餐无需登录。后厨屏与管理端按「桌台 + 匿名顾客编号」识别这一桌下的单，
+      看不到姓名、手机号或微信账号。
+    </view>
+    <view class="caption" style="margin-top: 12rpx;">
+      演示版不含会员、积分、支付与跨设备历史订单；重新开桌会换编号，
+      之前的订单在本机不再显示（后厨数据仍保留）。
+    </view>
+  </view>
+
+  <view class="card card--flat">
+    <view class="caption">
+      三端（管理端 / 后厨屏 / 本小程序）共用同一个后厨服务：下单、进度、溯源查询都是实时读取，
+      没有「同步」步骤。演示环境用局域网直连，正式发布需要已备案 HTTPS 域名与小程序后台登记。
+    </view>
+    <view class="caption" style="margin-top: 16rpx;">版本 {{version}}</view>
+  </view>
+</view>

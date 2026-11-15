@@ -1,0 +1,43 @@
+# 后厨管理系统 - systemd 服务单元（A4，Linux 裸机部署路径）
+# 安装：
+#   sudo cp deploy/kitchen-api.service /etc/systemd/system/
+#   sudo systemctl daemon-reload && sudo systemctl enable --now kitchen-api
+# 日志：journalctl -u kitchen-api -f
+#
+# 说明：ExecStart 里的 /opt/kitchen 是部署根；python 用 venv（零第三方
+# 依赖，venv 只是为了与系统 Python 隔离，pyproject.toml 可直接 pip install .）
+
+[Unit]
+Description=Kitchen Management API (backend)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=kitchen
+Group=kitchen
+WorkingDirectory=/opt/kitchen
+Environment=KITCHEN_ADMIN_PASSWORD=__SET_IN_ENVFILE__
+Environment=KITCHEN_API_SECRET=__SET_IN_ENVFILE__
+# 环境文件优先（chmod 600，root 可读）：/etc/kitchen/kitchen.env
+EnvironmentFile=-/etc/kitchen/kitchen.env
+ExecStart=/opt/kitchen/.venv/bin/python -m kitchen.api.server \
+    --host 127.0.0.1 --port 8848 \
+    --var /opt/kitchen/var \
+    --db /opt/kitchen/var/runtime.db \
+    --schedule
+Restart=on-failure
+RestartSec=5
+# 进程防护：连续失败退避，不无限重启打爆日志
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
+# 安全加固（systemd 沙箱）
+NoNewPrivileges=true
+ProtectSystem=strict
+ReadWritePaths=/opt/kitchen/var /opt/kitchen/backups
+PrivateTmp=true
+ProtectHome=true
+
+[Install]
+WantedBy=multi-user.target

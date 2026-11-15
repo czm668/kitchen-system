@@ -1,0 +1,35 @@
+{
+  "version": "1.0",
+  "scenario": "kitchen",
+  "device_id": "kitchen-node-01",
+  "note": "P1/T1 无硬件注入脚本：13 类信号 = 12 个遥测指标（kitchen.json metrics）+ 1 类 RC522 刷卡事件信号。遥测指标 id 必须与场景 manifest 完全一致；事件按 at_s 相对秒回放。",
+  "signals": [
+    {"id": "t", "kind": "metric", "mode": "constant", "value": 26.0, "label": "后厨环境温度 °C"},
+    {"id": "h", "kind": "metric", "mode": "random_walk", "start": 58.0, "step": 1.2, "min": 45.0, "max": 75.0, "interval_s": 2.0, "seed": "kitchen-h", "label": "后厨环境湿度 %RH"},
+    {"id": "gas_level", "kind": "metric", "mode": "hold", "value": 0.78, "hold_s": 20.0, "baseline": 0.12, "label": "燃气浓度 0~1（前 20s 模拟泄漏）"},
+    {"id": "hood_temp", "kind": "metric", "mode": "curve", "loop": false, "label": "排烟罩温度 升温→保温→降温", "phases": [
+      {"name": "升温", "duration_s": 30.0, "from": 32.0, "to": 180.0},
+      {"name": "保温", "duration_s": 20.0, "from": 180.0, "to": 180.0},
+      {"name": "降温", "duration_s": 30.0, "from": 180.0, "to": 40.0}
+    ]},
+    {"id": "sterilize_temp", "kind": "metric", "mode": "constant", "value": 112.0, "label": "消毒柜温度 °C"},
+    {"id": "fridge_temp", "kind": "metric", "mode": "random_walk", "start": 4.0, "step": 0.3, "min": 2.0, "max": 8.0, "interval_s": 2.0, "seed": "kitchen-fridge", "label": "冷藏柜温度 °C"},
+    {"id": "freezer_temp", "kind": "metric", "mode": "constant", "value": -18.0, "label": "冷冻柜温度 °C"},
+    {"id": "sample_temp", "kind": "metric", "mode": "hold", "value": 12.0, "hold_s": 12.0, "baseline": 5.0, "label": "留样柜温度 °C（前 12s 模拟超温）"},
+    {"id": "flame_a", "kind": "metric", "mode": "hold", "value": 1.0, "hold_s": 10.0, "baseline": 0.0, "label": "A 工位明火 0/1（前 10s 点火）"},
+    {"id": "flame_b", "kind": "metric", "mode": "constant", "value": 0.0, "label": "B 工位明火 0/1"},
+    {"id": "sct_current", "kind": "metric", "mode": "hold", "value": 1.8, "hold_s": 35.0, "baseline": 0.0, "label": "运行电流 A（前 35s 风机运行）"},
+    {"id": "weight_g", "kind": "metric", "mode": "constant", "value": 125.0, "label": "留样称重 g"},
+    {"id": "rfid_card", "kind": "event", "topic": "event/rfid", "label": "RC522 刷卡事件（非遥测，不进 sensor_readings）"}
+  ],
+  "events": [
+    {"at_s": 3.0, "kind": "rfid", "topic": "event/rfid", "payload": {"card_uid": "04A1B2C3", "staff_id": "chef-01", "station": "A", "result": "pass", "action": "check_in"}},
+    {"at_s": 8.0, "kind": "cmd_ack", "topic": "cmd/ack", "cmd_id": "kitchen-demo-001", "action": "gas_valve_close", "channel": "CH1", "ok": true, "source": "gas_leak", "manual_confirmed": false},
+    {"at_s": 9.0, "kind": "cmd_ack", "topic": "cmd/ack", "cmd_id": "kitchen-demo-002", "action": "fan_on", "channel": "CH2", "ok": true, "source": "gas_leak", "manual_confirmed": false},
+    {"at_s": 14.0, "kind": "cmd_ack", "topic": "cmd/ack", "cmd_id": "kitchen-demo-003", "action": "power_cut", "channel": "CH3", "ok": true, "source": "vision_violation", "manual_confirmed": false},
+    {"at_s": 20.0, "kind": "rfid", "topic": "event/rfid", "payload": {"card_uid": "04A1B2C3", "staff_id": "chef-01", "station": "A", "result": "pass", "action": "return_to_post"}},
+    {"at_s": 26.0, "kind": "cmd_ack", "topic": "cmd/ack", "cmd_id": "kitchen-demo-004", "action": "gas_valve_open", "channel": "CH1", "ok": true, "manual_confirmed": true, "reviewers": ["web", "tft"]},
+    {"at_s": 28.0, "kind": "cmd_ack", "topic": "cmd/ack", "cmd_id": "kitchen-demo-005", "action": "fan_off", "channel": "CH2", "ok": true, "manual_confirmed": true, "reviewers": ["web", "tft"]},
+    {"at_s": 30.0, "kind": "cmd_ack", "topic": "cmd/ack", "cmd_id": "kitchen-demo-006", "action": "power_restore", "channel": "CH3", "ok": true, "manual_confirmed": true, "reviewers": ["web", "tft"], "dual_review": ["web", "tft"]}
+  ]
+}

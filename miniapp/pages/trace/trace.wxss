@@ -1,0 +1,9 @@
+@import "../../templates/common.wxss";
+
+.qr-box {
+  width: 200rpx; height: 200rpx; flex-shrink: 0;
+  background: #f2f2f7; border-radius: 14rpx;
+  display: flex; align-items: center; justify-content: center;
+}
+.qr-img { width: 184rpx; height: 184rpx; }
+.qr-fallback { text-align: center; line-height: 1.8; }

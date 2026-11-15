@@ -1,0 +1,78 @@
+<import src="../../templates/common.wxml"/>
+
+<view class="page">
+  <!-- 消息中心入口：未读角标来自 /api/customer/notifications?since=已读序号 -->
+  <view class="card card--tap row between" bindtap="goNotifications">
+    <view class="row gap-12">
+      <view class="badge info">消息</view>
+      <view class="title">出餐通知</view>
+    </view>
+    <view class="row gap-8">
+      <view wx:if="{{unread > 0}}" class="badge danger badge--sm num">{{unread}} 条未读</view>
+      <text class="arrow">›</text>
+    </view>
+  </view>
+
+  <template wx:if="{{error}}" is="state-error" data="{{error: error}}"/>
+  <template wx:elif="{{loading}}" is="state-loading" data="{{}}"/>
+  <template wx:elif="{{empty}}" is="state-empty"
+            data="{{mark: '·', title: '还没有订单', hint: '下单后可以实时看到每道菜的制作进度', actionText: '去点菜'}}"/>
+
+  <block wx:else>
+    <view wx:if="{{activeOrders.length}}" class="section">
+      <view class="section-title">进行中</view>
+      <view class="section-hint num">{{activeOrders.length}} 单</view>
+    </view>
+    <view wx:for="{{activeOrders}}" wx:key="id" class="card card--tap"
+          bindtap="openDetail" data-id="{{item.id}}">
+      <view class="row between">
+        <view class="title">{{item.order_no}}</view>
+        <view class="badge info badge--sm">{{item.table_id || '-'}} 号桌</view>
+      </view>
+      <view class="muted" style="margin-top: 8rpx;">
+        {{item.created_text}} 下单 · 预计 {{item.due_text}} 出餐 · 剩 {{item.remain_minutes}} 分钟
+      </view>
+      <view wx:if="{{item.customer_ref}}" class="caption" style="margin-top: 6rpx;">
+        顾客 {{item.customer_ref}} · 后厨按此编号对单
+      </view>
+      <view class="progress" style="margin-top: 20rpx;">
+        <view class="progress__fill" style="width: {{item.percent}}%;"></view>
+      </view>
+      <view class="caption" style="margin-top: 8rpx;">整单进度 {{item.percent}}% · 共 {{item.item_count}} 份</view>
+
+      <view wx:for="{{item.items}}" wx:for-item="dish" wx:key="id" class="dish-row">
+        <view class="grow">
+          <view class="row gap-8">
+            <text>{{dish.dish_name}} × {{dish.qty}}</text>
+            <text class="badge {{dish.state_tone}} badge--sm">{{dish.state_label}}</text>
+          </view>
+          <view class="caption" style="margin-top: 6rpx;">
+            {{dish.eta_text}}<text wx:if="{{dish.urge_count > 0}}"> · 已催 {{dish.urge_count}} 次</text>
+          </view>
+        </view>
+        <view wx:if="{{dish.can_urge}}" class="btn ghost btn--sm {{dish.urge_disabled ? 'disabled' : ''}}"
+              catchtap="urge" data-id="{{dish.id}}">{{dish.urge_text}}</view>
+      </view>
+    </view>
+
+    <view wx:if="{{doneOrders.length}}" class="section">
+      <view class="section-title">已完成</view>
+      <view class="section-hint num">{{doneOrders.length}} 单</view>
+    </view>
+    <view wx:for="{{doneOrders}}" wx:key="id" class="card card--tap"
+          bindtap="openDetail" data-id="{{item.id}}">
+      <view class="row between">
+        <view class="title">{{item.order_no}}</view>
+        <view class="badge ok badge--sm">已完成</view>
+      </view>
+      <view class="muted" style="margin-top: 8rpx;">
+        {{item.created_text}} · 共 {{item.item_count}} 份
+      </view>
+      <view class="caption" style="margin-top: 12rpx;">
+        <text wx:for="{{item.items}}" wx:for-item="dish" wx:key="id">
+          {{dish.dish_name}} ×{{dish.qty}}{{index === item.items.length - 1 ? '' : '、'}}
+        </text>
+      </view>
+    </view>
+  </block>
+</view>

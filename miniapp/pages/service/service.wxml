@@ -1,0 +1,134 @@
+<import src="../../templates/common.wxml"/>
+
+<view class="page">
+  <view class="card card--flat">
+    <view class="section-title">智能客服 · 即时受理</view>
+    <view class="caption" style="margin-top: 12rpx;">
+      提交后由 AI 秒级分类并回复；简单咨询可当场答复结案。涉及退款、异物或身体不适的，
+      一律转「组长核实证据 → 管理人员终审」。
+    </view>
+    <view class="caption" style="margin-top: 12rpx;">
+      演示环境无支付链路：审批通过只生成补偿凭证，不发生实际退款。
+    </view>
+  </view>
+
+  <template wx:if="{{error}}" is="state-error" data="{{error: error}}"/>
+  <template wx:elif="{{loading}}" is="state-loading" data="{{}}"/>
+
+  <block wx:else>
+    <view class="section"><view class="section-title">我的用餐画像</view></view>
+    <view class="card">
+      <view class="h3">{{portrait || '暂无画像数据'}}</view>
+      <view class="caption" style="margin-top: 12rpx;">
+        生成方式 {{portraitMode === 'live' ? '在线模型' : '离线规则引擎'}} ·
+        累计 {{facts.order_count || 0}} 单 · 客诉 {{facts.complaint_count || 0}} 次
+      </view>
+      <view class="caption" style="margin-top: 8rpx;">
+        仅聚合订单统计，不含姓名、手机号或微信账号；样本不足时不会推测偏好。
+      </view>
+      <view wx:if="{{topDishText}}" class="caption" style="margin-top: 8rpx;">
+        常点：{{topDishText}}
+      </view>
+    </view>
+
+    <view class="section"><view class="section-title">忌口与偏好</view></view>
+    <view class="card">
+      <view class="caption">点选后随下次开桌同步到档案，用于提醒后厨。</view>
+      <view class="tag-row">
+        <view wx:for="{{tagOptions}}" wx:key="name"
+              class="tag-pill {{item.selected ? 'on' : ''}}"
+              bindtap="toggleTag" data-name="{{item.name}}">{{item.name}}</view>
+      </view>
+    </view>
+
+    <view class="section"><view class="section-title">发起客诉</view></view>
+    <view class="card">
+      <view class="kv__k">问题描述</view>
+      <textarea class="textarea" placeholder="例如：等了很久还没上菜 / 菜里有异物，希望核实"
+                maxlength="500" value="{{text}}" bindinput="onTextInput"/>
+      <picker mode="selector" range="{{orderLabels}}" value="{{orderIndex}}" bindchange="onOrderChange">
+        <view class="list-link">
+          <view class="kv__k">关联订单</view>
+          <view class="row gap-8">
+            <text class="kv__v">{{orderLabels.length ? orderLabels[orderIndex] : '暂无订单'}}</text>
+            <text class="arrow">›</text>
+          </view>
+        </view>
+      </picker>
+      <view class="list-link">
+        <view class="kv__k">申请补偿</view>
+        <switch checked="{{wantsRefund}}" bindchange="onRefundChange" color="#0071e3"/>
+      </view>
+      <picker wx:if="{{wantsRefund}}" mode="selector" range="{{compensationLabels}}"
+              value="{{compensationIndex}}" bindchange="onCompensationChange">
+        <view class="list-link">
+          <view class="kv__k">补偿方式</view>
+          <view class="row gap-8">
+            <text class="kv__v">{{compensationLabels[compensationIndex]}}</text>
+            <text class="arrow">›</text>
+          </view>
+        </view>
+      </picker>
+      <view class="kv__k" style="margin-top: 16rpx;">证据说明（选填）</view>
+      <input class="input" placeholder="例如：已拍照交服务员 / 出餐时间记录"
+             maxlength="300" value="{{evidenceText}}" bindinput="onEvidenceInput"/>
+      <view class="submit-btn {{submitting ? 'disabled' : ''}}" bindtap="submit">
+        {{submitting ? '正在受理…' : '提交给智能客服'}}
+      </view>
+      <view class="caption" style="margin-top: 12rpx;">
+        补偿金额按订单下单时的价格快照核算，不由顾客填写。
+      </view>
+    </view>
+
+    <view wx:if="{{reply}}" class="card card--ai">
+      <view class="row between">
+        <view class="title">工单 {{reply.complaint_no}}</view>
+        <view class="badge {{reply.state === 'auto_closed' ? 'ok' : 'info'}} badge--sm">
+          {{reply.state === 'auto_closed' ? '已答复' : '已受理'}}
+        </view>
+      </view>
+      <view class="caption" style="margin-top: 12rpx;">AI 分类：{{reply.category}} · {{reply.ai_mode === 'live' ? '在线模型' : '离线规则引擎'}}</view>
+      <view class="h3" style="margin-top: 16rpx;">{{reply.ai_reply}}</view>
+      <view class="caption" style="margin-top: 12rpx;">{{reply.note}}</view>
+    </view>
+
+    <view class="section">
+      <view class="section-title">我的工单</view>
+      <view class="section-hint num">{{complaints.length}} 条</view>
+    </view>
+
+    <view wx:if="{{!complaints.length}}" class="card card--flat">
+      <view class="caption">还没有客诉记录。</view>
+    </view>
+
+    <view wx:for="{{complaints}}" wx:key="id" class="card">
+      <view class="row between">
+        <view class="title">{{item.complaint_no}}</view>
+        <view class="badge {{item.state_tone}} badge--sm">{{item.state_label}}</view>
+      </view>
+      <view class="muted" style="margin-top: 10rpx;">{{item.category}} · {{item.text}}</view>
+      <view wx:if="{{item.ai_summary}}" class="caption" style="margin-top: 12rpx;">
+        AI 建议（{{item.ai_mode_label}}）：{{item.ai_summary}}
+      </view>
+      <view wx:if="{{item.degraded}}" class="caption" style="margin-top: 8rpx;">
+        在线模型不可用，已自动降级：{{item.degraded}}
+      </view>
+      <view wx:if="{{item.wants_refund}}" class="caption" style="margin-top: 12rpx;">
+        补偿基数 ¥{{item.amount}} · {{item.compensation_note}}
+      </view>
+      <view wx:if="{{item.reviewer}}" class="caption" style="margin-top: 8rpx;">
+        核实：{{item.reviewer}} · 终审：{{item.approver || '待处理'}}
+      </view>
+      <view wx:if="{{item.voucher_no}}" class="caption" style="margin-top: 8rpx;">
+        补偿凭证 {{item.voucher_no}}
+      </view>
+      <view wx:if="{{item.reject_reason}}" class="caption" style="margin-top: 8rpx;">
+        驳回原因：{{item.reject_reason}}
+      </view>
+      <view wx:if="{{item.can_supplement}}" class="submit-btn ghost"
+            bindtap="supplement" data-id="{{item.id}}" data-version="{{item.version}}">
+        补充证据并重新提交
+      </view>
+    </view>
+  </block>
+</view>

@@ -1,0 +1,74 @@
+# 后厨管理系统 - Docker Compose（A4）
+# 用法：docker compose up -d ；日志：docker compose logs -f api
+# MySQL 部署路径：migrations/001-014 在 mysql 服务首次启动时自动执行
+# （./migrations 挂到 /docker-entrypoint-initdb.d，MySQL 官方镜像首启自动跑 .sql）。
+#
+# ⚠️ 上生产前必须改的三个值（.env 或直接改这里）：
+#   KITCHEN_ADMIN_PASSWORD / KITCHEN_API_SECRET / MYSQL_ROOT_PASSWORD
+
+services:
+  api:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    container_name: kitchen-api
+    ports:
+      - "8848:8848"
+    environment:
+      # —— prod 安全（A5 基础）：账号口令只给 PBKDF2 摘要，见 accounts.py
+      KITCHEN_ADMIN_PASSWORD: "${KITCHEN_ADMIN_PASSWORD:?请设置管理口令}"
+      KITCHEN_API_SECRET: "${KITCHEN_API_SECRET:?请设置 API 签名密钥}"
+      # —— MySQL 连接（当前 app 用 SQLite 运行时库；接 MySQL 需在 storage 层
+      #    换连接串，schema 与 migrations/ 逐列一致，见 deploy/README.md）
+      KITCHEN_DB_URL: "mysql://kitchen:${MYSQL_PASSWORD}@mysql:3306/kitchen"
+    volumes:
+      - api_var:/app/var          # 队列/审计/运行时库持久化
+      - api_backups:/app/backups  # 备份输出
+    depends_on:
+      mysql:
+        condition: service_healthy
+    restart: unless-stopped
+
+  mysql:
+    image: mysql:8.4
+    container_name: kitchen-mysql
+    environment:
+      MYSQL_DATABASE: kitchen
+      MYSQL_USER: kitchen
+      MYSQL_PASSWORD: "${MYSQL_PASSWORD:?请设置 MySQL 口令}"
+      MYSQL_ROOT_PASSWORD: "${MYSQL_ROOT_PASSWORD:?请设置 root 口令}"
+    volumes:
+      - mysql_data:/var/lib/mysql
+      # 42 张表 / 63 索引：首启自动执行（按文件名序 001→014）
+      - ../migrations:/docker-entrypoint-initdb.d:ro
+    command: >
+      --character-set-server=utf8mb4
+      --collation-server=utf8mb4_unicode_ci
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-ukitchen",
+             "-p${MYSQL_PASSWORD}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  # 备份侧车：每晚 02:00 打包 MySQL 与 api 卷（backup.py 逻辑，容器化版）
+  # 简化口径：MySQL 侧用 mysqldump，api 卷直接打 zip——恢复步骤见 README
+  backup:
+    image: python:3.11-slim
+    container_name: kitchen-backup
+    volumes:
+      - api_var:/source/var:ro
+      - api_backups:/dest
+    entrypoint: >
+      sh -c "while true; do
+        if [ $$(( ( $(date +%%s) / 60 ) %% 1440 )) -eq 120 ]; then
+          python -c 'true'; tar czf /dest/mysql_$(date +%%Y%%m%%d).tar.gz /source/var;
+          find /dest -name 'mysql_*.tar.gz' -mtime +14 -delete;
+        fi; sleep 60; done"
+    restart: unless-stopped
+
+volumes:
+  api_var:
+  api_backups:
+  mysql_data:
