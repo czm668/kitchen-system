@@ -18,11 +18,11 @@ services:
       # —— prod 安全（A5 基础）：账号口令只给 PBKDF2 摘要，见 accounts.py
       KITCHEN_ADMIN_PASSWORD: "${KITCHEN_ADMIN_PASSWORD:?请设置管理口令}"
       KITCHEN_API_SECRET: "${KITCHEN_API_SECRET:?请设置 API 签名密钥}"
-      # —— MySQL 连接【预留，当前无代码消费】
-      #    Dockerfile 的 CMD 写死 `--db /app/var/runtime.db`，storage 层只支持
-      #    SQLite；下面这个变量目前没有任何代码读取，MySQL 容器因此是空跑。
-      #    接 MySQL 需先在 storage/db.py 换连接串（schema 与 migrations/ 逐列
-      #    一致，见 deploy/README.md §一），属架构改动，答辩口径务必如实说明。
+      # —— MySQL 连接（A18 已接线，不再是预留）
+      #    server.py 的 --db-url 从本变量读取 → AppStateConfig.db_url →
+      #    storage/backend.py 走 pymysql 后端，遥测帧/告警事件写进 MySQL。
+      #    优先级高于 Dockerfile CMD 里的 --db（SQLite 兜底）；
+      #    mysql:// 一旦设置，连不上明确抛错，不静默退回文件库。
       KITCHEN_DB_URL: "mysql://kitchen:${MYSQL_PASSWORD}@mysql:3306/kitchen"
     volumes:
       - api_var:/app/var          # 队列/审计/运行时库持久化

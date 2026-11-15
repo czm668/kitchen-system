@@ -57,11 +57,28 @@ docker compose up -d --build
 `.env` 已被 `.gitignore` 排除，真实口令不要提交进版本库。
 
 MySQL 首启自动按 001→017 顺序执行 `migrations/`（**17 份 / 50 表 / 71 索引**）。
-⚠️ **当前 app 容器仍用 SQLite 运行时库**：compose 传的 `KITCHEN_DB_URL`
-**没有任何代码消费**（Dockerfile 的 CMD 写死 `--db /app/var/runtime.db`），
-MySQL 容器是空跑，数据进 `api_var` 卷。接 MySQL 需在 `storage/db.py` 换
-连接串——schema 与 MySQL DDL 逐列一致（`migrate.py` 双向翻译已验证），
-这是 A1 的设计预留，属**架构改动，尚未实施**。答辩口径务必照实说。
+
+**A18 起 api 真正连 MySQL**（11/15 14:44 实测）：compose 注入的
+`KITCHEN_DB_URL` 由 `server.py --db-url` → `AppStateConfig.db_url` →
+`storage/backend.py` 消费，走 pymysql 后端。启动时日志会打印
+`运行时库已就绪：mysql://kitchen:***@mysql:3306/kitchen（MySQL）`，
+口令已脱敏；`/api/admin/db/stats` 返回 `backend=mysql`。
+`mysql://` 一旦设置，**连不上就明确抛错，不静默退回 SQLite**。
+Dockerfile CMD 里保留的 `--db /app/var/runtime.db` 只是「未注入
+`KITCHEN_DB_URL` 时」的兜底（例如单独 `docker run` 不带 compose）；
+compose 场景下 db_url 优先，SQLite 文件不再被写。
+
+方言差异（占位符 `?`/`%s`、事务上下文、异常类型、表清单查询）收敛在
+`backend.py`，`recorders.py` 的 SQL 只有一份，**SQLite 路径行为零变化**
+（1374 例单测 + 裸机 8848 演示全绿）。`db.py` 未改动。
+
+⚠️ **如实边界，答辩务必照说**：
+- 运行时写库只覆盖 `sensor_readings`（遥测帧）与 `alarm_events`（告警事件）
+  **2 张表**；其余 48 张是 DDL 空表，订单/菜品/人员等业务状态仍是内存态
+  （A1 设计如此，「业务写路径第二轮」从未实施，不是接线漏了）。
+- 备份侧车 `backup-sidecar.sh` 只归档 `api_var` 卷，**MySQL 数据在
+  `mysql_data` 卷里，目前没被备份**；mysqldump 逻辑备份仍未接入。
+- 生产化（nginx / HTTPS / 浏览器实机点检）仍按 A10，架构文档 §7 明确不在范围。
 
 ### 反向代理与 HTTPS（两路径通用）
 

@@ -1,29 +1,33 @@
 # -*- coding: utf-8 -*-
-"""运行时记录器：把遥测帧与告警事件写进运行时库。
+"""运行时记录器：把遥测帧与告警事件写进运行时库（SQLite / MySQL 双后端）。
 
 两个写入点（`api/state.py`）：
 - `tick()` 里 `telemetry.push(...)` 之后 → `record_frame`（12 指标展开成行）；
 - `_emit(...)` 事件出口 → `record_event`（rule / guard / fault-escalate 进
   `alarm_events`，其余业务事件不落库——它们有各自的表，写路径在 A1 第二轮）。
 
-线程模型：采样线程写、请求线程读，`check_same_thread=False` + 自带锁；
-写失败只计数不抛异常（采样线程不能被落库拖死）。
+线程模型：采样线程写、请求线程读，自带锁；写失败只计数不抛异常
+（采样线程不能被落库拖死）。
+
+A18：底层连接改由 `storage/backend.py` 的 `RuntimeDB` 门面提供，方言差异
+（占位符、事务上下文、异常类型、表清单查询）都收敛在那一层。SQL 仍统一写
+`?`，SQLite 分支零行为变化；类名 `SqliteRecorder` 保留是兼容既有导入与
+`.conn` 属性，实际后端由 target 决定。
 """
 from __future__ import annotations
 
 import json
 import logging
-import sqlite3
 import threading
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Mapping
 
-from .db import db_stats, open_runtime_db
+from .backend import open_runtime
 
 log = logging.getLogger("kitchen.storage.recorders")
 
-__all__ = ["SqliteRecorder"]
+__all__ = ["SqliteRecorder", "RuntimeRecorder"]
 
 #: 只有这三类事件是「告警口径」——进 alarm_events。其余 kind 属于业务事件流
 #: （订单/刷卡/网络），它们的状态表在 A1 第二轮接写路径，这里不重复记。
@@ -46,13 +50,23 @@ def _clip(value: Any, limit: int) -> str | None:
 
 
 class SqliteRecorder:
-    """运行时库写入器。`close()` 幂等。"""
+    """运行时库写入器（类名保留兼容，实际支持 SQLite / MySQL）。`close()` 幂等。
 
-    def __init__(self, path: str | Path, *, device_id: str = "kitchen-node-01",
+    `target` 为文件路径时用 SQLite（默认，A1 行为不变）；为
+    `mysql://user:pass@host:port/db` 时走 MySQL（A18）。
+    """
+
+    def __init__(self, target: str | Path, *, device_id: str = "kitchen-node-01",
                  migrations_dir: Path | None = None) -> None:
-        self.path = Path(path)
+        self.target = target
+        # 兼容既有代码读取的 .path：URL 目标不做 Path 转换（否则 Windows 上
+        # 会把 "mysql://..." 变成畸形路径），只在 SQLite 时是 Path。
+        self.path = target if isinstance(target, Path) else (
+            Path(target) if not str(target).startswith(("mysql://", "mysql+pymysql://"))
+            else target
+        )
         self.device_id = str(device_id)
-        self.conn: sqlite3.Connection = open_runtime_db(self.path, migrations_dir=migrations_dir)
+        self.conn = open_runtime(target, migrations_dir=migrations_dir)
         self._lock = threading.Lock()
         self.write_failures = 0
         self.frames_written = 0
@@ -73,13 +87,13 @@ class SqliteRecorder:
         if not rows:
             return 0
         try:
-            with self._lock, self.conn:
+            with self._lock, self.conn.transaction():
                 self.conn.executemany(
                     "INSERT INTO sensor_readings (device_id, metric, value, ts) "
                     "VALUES (?, ?, ?, ?)",
                     [(self.device_id, metric, value, ts_text) for metric, value, ts_text in rows],
                 )
-        except sqlite3.Error:
+        except self.conn.errors:
             self.write_failures += 1
             log.warning("遥测帧落库失败（第 %d 次）", self.write_failures, exc_info=True)
             return 0
@@ -99,14 +113,14 @@ class SqliteRecorder:
         message = _clip(body.get("message") or kind, 255)
         snapshot = _clip(json.dumps(body, ensure_ascii=False, default=str), 255)
         try:
-            with self._lock, self.conn:
+            with self._lock, self.conn.transaction():
                 self.conn.execute(
                     "INSERT INTO alarm_events "
                     "(scenario, device_id, source, level, atype, message, snapshot, handled, ts) "
                     "VALUES (?, ?, 'rule', ?, ?, ?, ?, 0, ?)",
                     (kind, self.device_id, level, atype, message, snapshot, _fmt_ts(ts)),
                 )
-        except sqlite3.Error:
+        except self.conn.errors:
             self.write_failures += 1
             log.warning("告警事件落库失败（第 %d 次）", self.write_failures, exc_info=True)
             return False
@@ -117,10 +131,11 @@ class SqliteRecorder:
     def stats(self) -> dict[str, Any]:
         """库体检：表行数 + 本进程写入计数。"""
         with self._lock:
-            tables = db_stats(self.conn)
+            tables = self.conn.stats()
         return {
             "enabled": True,
-            "path": str(self.path),
+            "backend": self.conn.dialect,
+            "path": self.conn.display,
             "tables": tables,
             "frames_written": self.frames_written,
             "events_written": self.events_written,
@@ -149,26 +164,22 @@ class SqliteRecorder:
         sql += " ORDER BY ts DESC, id DESC LIMIT ?"
         args.append(max(1, min(int(limit), 2000)))
         with self._lock:
-            rows = self.conn.execute(sql, args).fetchall()
+            rows = self.conn.query(sql, args)
         return [{"metric": m, "value": v, "ts": t} for m, v, t in rows]
 
     def alarms_history(self, *, limit: int = 100) -> list[dict[str, Any]]:
         with self._lock:
-            rows = self.conn.execute(
+            rows = self.conn.query(
                 "SELECT scenario, device_id, source, level, atype, message, ts "
                 "FROM alarm_events ORDER BY ts DESC, id DESC LIMIT ?",
                 (max(1, min(int(limit), 1000)),),
-            ).fetchall()
+            )
         keys = ("scenario", "device_id", "source", "level", "atype", "message", "ts")
         return [dict(zip(keys, row)) for row in rows]
 
     # ------------------------------------------------------------ 生命周期
     def close(self) -> None:
         with self._lock:
-            try:
-                self.conn.commit()
-            except sqlite3.Error:
-                pass
             self.conn.close()
 
     def __enter__(self) -> "SqliteRecorder":
@@ -176,3 +187,7 @@ class SqliteRecorder:
 
     def __exit__(self, *exc: Any) -> None:
         self.close()
+
+
+#: 语义更准的别名；保留 SqliteRecorder 是为了不破坏既有导入与单测。
+RuntimeRecorder = SqliteRecorder

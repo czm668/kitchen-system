@@ -10,6 +10,9 @@ test = ["pytest>=7.0"]
 # A2 MQTT 真链路：不装也能跑（Inproc 进程内通道覆盖全部代码路径），
 # 演示真 broker 用 `--amqtt`（内嵌）或 `--broker host:port`（EMQX 等）
 mqtt = ["paho-mqtt>=2.0", "amqtt>=0.11"]
+# A18 MySQL 后端：仅当设置 KITCHEN_DB_URL 时才 import pymysql。
+# 裸机演示 / SQLite 路径 / 全部单测都不需要它（核心仍是零依赖标准库）。
+mysql = ["pymysql>=1.1,<2"]
 
 [tool.pytest.ini_options]
 # 业务代码只在 src/ 下；vendor/ 是只读素材落点，不进 import 路径。

@@ -1,12 +1,11 @@
-# 后厨管理系统 - 生产镜像（A4）
-# 构建：docker build -t kitchen-api deploy/
+# 后厨管理系统 - 生产镜像（A4 / A18）
+# 构建：docker compose -f deploy/docker-compose.yml build
 # 运行：docker compose up -d（见 docker-compose.yml，含 MySQL）
 #
-# 注意：开发机为 Windows + 便携 Python；Docker Desktop 4.99 于 11/15 装好、
-# 引擎已验证（29.9.3/overlayfs），但容器实测尚未完成（国内拉 Docker Hub
-# 镜像超时，见 deploy/README.md §四第 4 条）。本文件按标准 python:3.11-slim
-# 路径编写，首次在有 Docker 的机器上构建时如有平台差异按报错微调即可
-# （预期问题集中在文件权限与路径分隔符）。
+# 开发机为 Windows + 便携 Python；Docker Desktop 4.99 于 11/15 装好，
+# 11/15 14:12 `compose up -d --build` 容器实测通过（见
+# 05_系统记录/20261115_A17容器实测记录.md）。A18 起 api 真正连 MySQL，
+# 不再写死 SQLite 文件。
 
 FROM python:3.11-slim AS base
 
@@ -14,12 +13,20 @@ FROM python:3.11-slim AS base
 RUN useradd --create-home --shell /usr/sbin/nologin kitchen
 WORKDIR /app
 
+# A18：运行期唯一第三方依赖是 MySQL 驱动（纯 Python，无编译）。
+# 只有设置 KITCHEN_DB_URL 才会 import；SQLite / 裸机演示路径仍是零依赖标准库。
+# 固定版本保证可复现；国内源只是加速，换环境可用 --build-arg PIP_INDEX_URL 覆盖。
+ARG PIP_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple
+RUN pip install --no-cache-dir --disable-pip-version-check \
+        --index-url "${PIP_INDEX_URL}" "pymysql==1.1.1"
+
 # 包在 /app/src 下，`python -m kitchen.api.server` 的默认 sys.path[0] 是
 # WORKDIR(/app)，不加这一行容器启动会 No module named kitchen。
 # （裸机 Windows 走仓库根 pytest 配置，不需要；容器是标准 CPython，PYTHONPATH 生效）
 ENV PYTHONPATH=/app/src
 
-# 依赖层：本工程运行期零第三方依赖（标准库），只装运行环境需要的部分。
+# 代码层：核心业务仍是纯标准库；唯一第三方依赖是上面的 pymysql，
+# 且只在 KITCHEN_DB_URL 存在时才被 import。
 # 单独 COPY pyproject 是为了利用 Docker 层缓存——代码改动不触发重装。
 COPY pyproject.toml ./
 COPY src/ ./src/
@@ -43,8 +50,10 @@ EXPOSE 8848
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
     CMD python -c "import urllib.request,os; urllib.request.urlopen(f'http://127.0.0.1:{os.environ.get(\"KITCHEN_PORT\",\"8848\")}/api/health', timeout=4)" || exit 1
 
-# 生产入口：--db 落库（容器内 SQLite；MySQL 部署见 compose 的 mysql 服务）
-# 密钥/口令经环境变量注入（KITCHEN_ADMIN_PASSWORD / KITCHEN_API_SECRET）
+# 生产入口（A18）：--db-url 由 server 从 KITCHEN_DB_URL 环境变量读取，
+# compose 注入 mysql://... 即连 MySQL；未注入时 --db 兜底走容器内 SQLite。
+# 密钥/口令经环境变量注入（KITCHEN_ADMIN_PASSWORD / KITCHEN_API_SECRET /
+# MYSQL_PASSWORD），镜像里不写任何默认值。
 CMD ["python", "-m", "kitchen.api.server", \
      "--host", "0.0.0.0", "--port", "8848", \
      "--var", "/app/var", \

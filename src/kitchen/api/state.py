@@ -192,6 +192,10 @@ class AppStateConfig:
     #: None = 纯内存（既有默认）；指向 SQLite 文件即启用（dev 演示口径，
     #: DDL 与 migrations/ 一致，prod 换 MySQL 连接同 schema）
     db_path: Path | None = None
+    #: 运行时库 URL（A18）：`mysql://user:pass@host:port/db`。
+    #: 设置后优先于 db_path，走 MySQL 后端；连不上明确抛错，不静默降级。
+    #: None = 沿用 db_path 的 SQLite 行为（既有 1363 例单测零影响）。
+    db_url: str | None = None
     #: 定时任务托管（A3）：False = 不起调度线程（既有默认，单测零影响）。
     #: True 时托管两个真缺的任务：留样到期扫描（#14）+ 证件每日扫描（#9）。
     #: 切档/工单升级在帧内已自动化，不经调度器（见 src/kitchen/scheduler.py）。
@@ -240,11 +244,17 @@ class AppState:
         if var is not None:
             var.mkdir(parents=True, exist_ok=True)
 
-        # ---------------------------------------------------------- 运行时库（A1）
-        # db_path 指向 SQLite 文件即启用遥测/告警落库；写失败只计数不抛——
-        # 落库是锦上添花，不能把采样线程打挂（口径同 AuditLog.write_failures）。
+        # ---------------------------------------------------------- 运行时库（A1/A18）
+        # db_path 指向 SQLite 文件即启用遥测/告警落库；db_url（mysql://）优先，
+        # 走 MySQL 后端。写失败只计数不抛——落库是锦上添花，
+        # 不能把采样线程打挂（口径同 AuditLog.write_failures）。
         self.recorder: SqliteRecorder | None = None
-        if self.config.db_path is not None:
+        if self.config.db_url:
+            # MySQL：URL 里带口令，绝不落日志；连接失败由 backend 直接抛出
+            self.recorder = SqliteRecorder(
+                self.config.db_url, device_id=self.config.device_id
+            )
+        elif self.config.db_path is not None:
             self.config.db_path.parent.mkdir(parents=True, exist_ok=True)
             self.recorder = SqliteRecorder(
                 self.config.db_path, device_id=self.config.device_id

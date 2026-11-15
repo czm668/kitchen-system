@@ -535,6 +535,9 @@ def main(argv: list[str] | None = None) -> int:  # pragma: no cover - CLI 入口
     parser.add_argument("--no-seed", action="store_true", help="不造演示订单")
     parser.add_argument("--db", default="",
                         help="运行时库路径（A1；空 = 纯内存，如 var/runtime.db）")
+    parser.add_argument("--db-url", default=os.environ.get("KITCHEN_DB_URL", ""),
+                        help="运行时库 URL（A18；mysql://user:pass@host:port/db）。"
+                             "也可用 KITCHEN_DB_URL 环境变量；非空时优先于 --db 走 MySQL")
     parser.add_argument("--schedule", action="store_true",
                         help="开启定时任务托管（A3：留样到期扫描 + 证件每日扫描）")
     parser.add_argument("--secret", default="",
@@ -555,6 +558,7 @@ def main(argv: list[str] | None = None) -> int:  # pragma: no cover - CLI 入口
         var_dir=Path(args.var),
         time_scale=args.time_scale,
         db_path=Path(args.db) if args.db else None,
+        db_url=args.db_url or None,
         scheduler_enabled=args.schedule,
     )
     state = AppState(
