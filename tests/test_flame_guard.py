@@ -231,3 +231,45 @@ class TestCardReset:
         # 复位后要过 60 秒冷却才会重新触发（引擎 anti-flap）
         feed(rt, guard, clock, flame=1.0, no_person=True, seconds=70)
         assert guard.locked
+
+    def test_多灶部署刷卡只解本灶的锁(self):
+        """工位隔离：A 灶厨师返岗刷卡，不能把 B 灶的离人锁一起解开。
+
+        多灶时每个灶一个 FlameGuard（vision/link.py「一个实例对应一个灶」），
+        并用 rule_ids= 圈定本灶规则——否则一张卡解所有 flame_b 锁，
+        B 灶可能真没人。
+        """
+        from kitchen.rules.model import Rule
+
+        clock = FakeClock()
+        rt = KitchenRuntime(load_builtin(), device_id="K-TEST", clock=clock, wall_clock=clock)
+        # 在内置 #3（id=22）之外补一条 B 灶的离人规则，模拟双灶
+        rules = [r for r in rt.engine.get_rules() if r.metric == "flame_b"]
+        extra = Rule(id="9001", metric="flame_b", op=">", threshold=0.5,
+                     kind="duration", duration_sec=12.0, latch=True,
+                     card_reset=True, requires=rules[0].requires)
+        rt.engine.set_rules(rules + [extra])
+
+        guard_a = FlameGuard(rt.engine, card_lookup=CARDS.get, clock=clock,
+                             rule_ids=("22",))          # A 灶：只管 22
+        guard_b = FlameGuard(rt.engine, card_lookup=CARDS.get, clock=clock,
+                             rule_ids=("9001",))        # B 灶：只管 9001
+
+        # 两个灶同时有火且无人 → 两条规则都闩锁
+        for _ in range(4):
+            clock.advance(5)
+            guard_a.observe_vision(no_person=True)
+            guard_b.observe_vision(no_person=True)
+            rt.tick({"flame_b": 1.0, **guard_a.vision_frame()})
+        assert guard_a.locked_rules() == ["22"]
+        assert guard_b.locked_rules() == ["9001"]
+
+        # A 灶厨师刷卡：只解 A 灶
+        result = guard_a.ack_by_card("04A2B3C1")
+        assert result.ok and result.reset == ("22",)
+        assert guard_a.locked_rules() == []
+        assert guard_b.locked_rules() == ["9001"], "B 灶的锁不该被 A 灶的卡解开"
+
+        # B 灶自己刷卡才解自己的
+        assert guard_b.ack_by_card("04A2B3C2").ok
+        assert guard_b.locked_rules() == []

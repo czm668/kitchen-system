@@ -23,10 +23,14 @@
 `vision_health()` 单独产出「视觉离线」告警，让平台知道这条防线当前是瞎的。
 **降级要说出来，不能装作还在工作。**
 
-## 刷卡复位只能复位 #3
+## 刷卡复位只能复位 #3，且只复位本灶
 
 `ack_by_card()` 只处理 `metric == flame_b` 的规则。不做这个限定，一张工牌就能把
 「气还在漏」的燃气联锁按成正常——这是整个系统里最危险的一条越权路径。
+
+工位维度同理：多灶部署时给每个灶一个 `FlameGuard` 实例（`vision/link.py` 的
+既有语义「一个实例对应一个灶」），并用 `rule_ids=` 把它圈在本灶的规则上。
+不做这个圈定，A 灶厨师返岗刷卡会把 B 灶的离人锁一起解开——B 灶可能真没人。
 
 工牌**过期仍然允许复位**：过期是合规问题，现场处置是安全问题。合规可以事后追责
 （写进 `warnings` 上送），安全不能等。但「工牌不存在」要拒绝——那说明卡是伪造的
@@ -107,6 +111,9 @@ class FlameGuard:
         result = rt.tick({**telemetry, **guard.vision_frame()})
         if guard.locked_rules():
             guard.ack_by_card("04A2B3C1")      # 厨师返岗刷卡
+
+    多灶部署时每个灶一个实例，并用 `rule_ids=` 圈定本灶的规则 id，
+    刷卡复位就只解本灶的锁（工位隔离）。
     """
 
     #: 本功能归属的指标（`env_thresholds.metric`）
@@ -120,9 +127,15 @@ class FlameGuard:
         vision_timeout_sec: float = 30.0,
         clock: Callable[[], float] | None = None,
         metric: str = METRIC,
+        rule_ids: Iterable[str] | None = None,
     ) -> None:
         self.engine = engine
         self.metric = metric
+        # 工位作用域：None = 本 metric 全部规则（单灶部署）；给了就只看这些
+        # 规则——多灶部署时每个灶一个实例，刷卡复位只解本灶的锁。
+        self._rule_scope: frozenset[str] | None = (
+            frozenset(rule_ids) if rule_ids is not None else None
+        )
         self.vision_timeout_sec = float(vision_timeout_sec)
         self._card_lookup = card_lookup
         self._clock = clock or time.monotonic
@@ -181,9 +194,12 @@ class FlameGuard:
 
     # ---------------------------------------------------------------- 工位锁
     def rules(self) -> list[Rule]:
-        """本功能相关的规则（`metric == flame_b`）。"""
-        return [rule for rule in self.engine.get_rules(include_disabled=True)
-                if rule.metric == self.metric]
+        """本实例管辖的规则（`metric == flame_b`，且在 `rule_ids` 作用域内）。"""
+        out = [rule for rule in self.engine.get_rules(include_disabled=True)
+               if rule.metric == self.metric]
+        if self._rule_scope is not None:
+            out = [rule for rule in out if rule.id in self._rule_scope]
+        return out
 
     def locked_rules(self) -> list[str]:
         """当前处于闩锁（= 工位被锁）的规则 id。空列表表示工位可用。"""
@@ -204,7 +220,7 @@ class FlameGuard:
 
     # ---------------------------------------------------------------- 刷卡复位
     def ack_by_card(self, uid: str) -> CardAckResult:
-        """返岗刷卡复位。只解锁 #3 相关的工位锁。"""
+        """返岗刷卡复位。只解锁本实例作用域内的 #3 工位锁（工位隔离）。"""
         uid = str(uid or "").strip()
         if not uid:
             return CardAckResult(False, None, "未读到卡号")

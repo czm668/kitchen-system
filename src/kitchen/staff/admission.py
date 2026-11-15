@@ -179,13 +179,9 @@ class AdmissionController:
                 checked_at=now or datetime.now(self.tz),
                 details=(f"staff_id={staff_id} 不存在",),
             )
-        if not staff.enabled:
-            reasons.append(DenyReason.STAFF_DISABLED)
-            details.append(f"{staff.name}({staff.code}) 已停用")
-        cert_reason, cert_detail = self._certificate_state(staff, day)
-        if cert_reason is not None:
-            reasons.append(cert_reason)
-            details.append(cert_detail)
+        # 与 scan() 共用同一份硬门禁（停用 + 健康证）——两处规则分叉后，
+        # 会出现「刷卡被拒但视觉判定认为在岗合法」这种自相矛盾的状态。
+        self._hard_gates(staff, day, reasons, details)
         if not reasons:
             self._gate(staff, station_id, day, reasons, details)
         active = self.repo.active_card_of(staff.id)
@@ -250,6 +246,26 @@ class AdmissionController:
                 f"{sorted(staff.qualifications) or '（无）'}"
             )
 
+    def _hard_gates(
+        self,
+        staff: Staff,
+        day: date,
+        reasons: list[DenyReason],
+        details: list[str],
+    ) -> None:
+        """硬门禁（scan/scan_staff 共用同一份）：人员停用 + 健康证状态。
+
+        抽成公共函数是刻意的：`scan()`（刷卡）与 `scan_staff()`（视觉/手动）
+        的入口不同，但这道判定必须唯一——任一处单改会出现「刷卡拒、视觉放」。
+        """
+        if not staff.enabled:
+            reasons.append(DenyReason.STAFF_DISABLED)
+            details.append(f"{staff.name}({staff.code}) 已停用")
+        cert_reason, cert_detail = self._certificate_state(staff, day)
+        if cert_reason is not None:
+            reasons.append(cert_reason)
+            details.append(cert_detail)
+
     def _resolve(
         self, card_uid: str, day: date,
     ) -> tuple[StaffCard | None, Staff | None, list[DenyReason], list[str]]:
@@ -274,14 +290,7 @@ class AdmissionController:
             reasons.append(DenyReason.UNKNOWN_CARD)
             details.append(f"卡号 {card.card_uid} 指向的 staff_id={card.staff_id} 不存在")
             return card, None, reasons, details
-        if not staff.enabled:
-            reasons.append(DenyReason.STAFF_DISABLED)
-            details.append(f"{staff.name}({staff.code}) 已停用")
-
-        cert_reason, cert_detail = self._certificate_state(staff, day)
-        if cert_reason is not None:
-            reasons.append(cert_reason)
-            details.append(cert_detail)
+        self._hard_gates(staff, day, reasons, details)
         return card, staff, reasons, details
 
     def _certificate_state(

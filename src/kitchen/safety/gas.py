@@ -291,11 +291,16 @@ class GasLeakMonitor:
             raise ValueError("明火期预警突变率必须小于联锁突变率")
         if duration_sec_flame < duration_sec:
             raise ValueError("明火期确认窗口不应短于平时，否则放宽就没有意义")
-        # 明火期联锁点必须落在绝对门限以下，否则「靠突变率联锁」这条分支永远走不到：
-        # 基线 0.08、比值 6 → 0.56 > 0.55，早被绝对门限先命中，放宽就成了假放宽。
+        # 明火期联锁点必须落在绝对门限以下，否则「靠突变率联锁」这条分支永远走不到。
+        # 突变率分支的触发点 ≈ 基线*(1+ratio)，随实际基线浮动；这里用 baseline_floor
+        # （基线**下界**）做保守校验：连下界算出的触发点都追不上绝对门限的 1.6 倍，
+        # 说明 ratio 配得离谱，直接拒配。例：floor=0.02、ratio=5 → 0.12 < 0.88 放行；
+        # 若把 ratio 调到 80 → 0.02*81=1.62 > 0.88，拒配并提示下调。
+        # 注：这只是配置量级的卫士，运行期基线抬高后若绝对门限先命中，属预期行为
+        # （绝对门限不因明火放宽，见 assess()），不是 bug。
         if baseline_floor * (1 + alarm_ratio_flame) >= absolute_threshold * 1.6:
             raise ValueError(
-                "明火期联锁突变率过高：常见基线（≈0.08）下会越过绝对门限，"
+                "明火期联锁突变率过高：突变率分支的触发点会越过绝对门限，"
                 "该分支永远不生效，请下调 alarm_ratio_flame"
             )
         self.absolute_threshold = float(absolute_threshold)

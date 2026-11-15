@@ -11,7 +11,11 @@ from pathlib import Path
 
 import pytest
 
-from tools import paper_figures as pf
+# paper_figures 依赖 matplotlib（论文图可选依赖）：本机未装时不让它把
+# 整套测试的收集阶段拖崩，模块级跳过。
+pytest.importorskip("matplotlib", reason="matplotlib 未安装（论文图可选依赖），跳过论文图回归")
+
+from tools import paper_figures as pf  # noqa: E402
 
 ROOT = pf.ROOT
 HAS_DATA = all(p.exists() for p in (pf.RESULTS_CSV, pf.TRAIN_LOG, pf.PR_PNG,
