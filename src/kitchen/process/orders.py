@@ -109,9 +109,14 @@ class OrderService:
         repo: MemoryProcessRepository,
         *,
         clock: Callable[[], datetime] | None = None,
+        sink: Callable[[Order, OrderEvent], None] | None = None,
     ) -> None:
         self.repo = repo
         self._clock = clock or (lambda: datetime.now(CST))
+        #: 每条事件落地后的旁路写器（A23）：订单/子项快照 UPSERT + 事件追加。
+        #: 写失败在写器内计数不抛——事件流本身仍是唯一事实源，落库丢了
+        #: 也不能影响状态机推进。
+        self._sink = sink
         self._orders: dict[int, Order] = {}
         self._events: dict[int, list[OrderEvent]] = {}
         self._idem: dict[tuple[str, str], OrderEvent] = {}
@@ -121,6 +126,18 @@ class OrderService:
     # ------------------------------------------------------------ 时间
     def now(self) -> datetime:
         return self._clock()
+
+    def align_ids(self, order_id: int = 0, item_id: int = 0) -> None:
+        """把自增游标推到「运行时库里已有最大主键」之后。
+
+        订单是**内存态 + 写穿镜像**：进程启动时内存是空的、游标回到 1，而库里
+        还留着上次运行的行。不先对齐，重启后新下的单会拿到 1、2、3 去 UPSERT，
+        把历史订单整行覆盖掉——不报错、不留痕，只是数据悄悄没了（A24 实测：
+        容器重启后 `orders` 表出现 id=1、2 的新行，而原 id=3 仍孤立存在）。
+        只往前推，不会把游标改小。
+        """
+        self._next_order = max(self._next_order, int(order_id or 0) + 1)
+        self._next_item = max(self._next_item, int(item_id or 0) + 1)
 
     # ------------------------------------------------------------ 读
     def order(self, order_id: int) -> Order:
@@ -184,7 +201,11 @@ class OrderService:
                     else self.repo.dish_by_code(str(ref)))
             if not dish.enabled:
                 raise OrderError(f"菜品「{dish.name}」已停售")
-            if dish.sold_out:
+            # 过期门禁：所有关联批次都过期 → 视同沽清，整单拒绝并列出。
+            # 与顾客菜单口径一致（menu 也用 expired_batch_of），避免菜单隐藏了
+            # 但直接调下单接口还能买到的绕过。
+            expired = self.repo.expired_batch_of(dish.id, moment)
+            if dish.sold_out or expired is not None:
                 sold_out.append(dish.name)
                 continue
             resolved.append((dish.id, max(1, int(qty))))
@@ -408,4 +429,9 @@ class OrderService:
         if client_event_id:
             self._idem[(channel, client_event_id)] = event
         order.version += 1
+        if self._sink is not None:
+            try:
+                self._sink(order, event)
+            except Exception:  # pragma: no cover - 写器自身已吞错，这里是双保险
+                log.warning("订单落库旁路异常（订单 %s）", order.order_no, exc_info=True)
         return event

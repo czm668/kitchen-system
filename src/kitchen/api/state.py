@@ -272,7 +272,19 @@ class AppState:
             self._journal_path, self.repo
         )
         self.staff_repo = MemoryStaffRepository.from_seed(staff_seed)
-        self.orders = OrderService(self.repo, clock=self.to_datetime)
+        # ------------------------------------------------------ 业务落库接线（A23）
+        # 写器存在时：仓储/订单/看板共用同一个连接与锁；不存在时全部保持
+        # None = 纯内存（既有行为零变化）。写失败只在写器内计数不抛。
+        if self.recorder is not None:
+            self.repo.recorder = self.recorder
+            self.staff_repo.recorder = self.recorder
+            self.orders = OrderService(
+                self.repo, clock=self.to_datetime, sink=self._persist_order,
+            )
+        else:
+            self.orders = OrderService(self.repo, clock=self.to_datetime)
+        #: 基线物化结果（表 → 行数），写器未启用时为空字典
+        self.baseline_written: dict[str, int] = {}
         self.admission = AdmissionController(self.staff_repo)
         self.board = DispatchBoard(
             self.repo, self.orders, clock=self.to_datetime,
@@ -290,9 +302,21 @@ class AppState:
         self.cooking = CookingBoard(
             self.repo, self.orders, clock=self.to_datetime
         )
+        # A23：过程执行域的看板接同一个写器（占用/工序/留样/消毒）
+        if self.recorder is not None:
+            self.board.recorder = self.recorder
+            self.disinfection.recorder = self.recorder
+            self.retention.recorder = self.recorder
+            self.cooking.recorder = self.recorder
+            # 基线物化：seed + 配置日志重放后的内存快照 → 配置表（INSERT IGNORE 幂等）
+            self.baseline_written = self.recorder.sync_baseline(self.repo, self.staff_repo)
         # 顾客端通道（A9）：令牌/归属/限频/通知。不复制业务逻辑，
         # 下单与催菜仍走上面的 orders——这条通道只做顾客视角的过滤。
-        self.customer = CustomerService(self)
+        # 令牌摘要 + 订单归属落 customer_journal，重启后顾客凭原令牌继续查单。
+        # 装配仍在 guest 之前：回放只恢复会话数据，不触发 guest.bind()。
+        self.customer = CustomerService(
+            self, journal_path=None if var is None else var / "customer_journal.jsonl",
+        )
         # A11 扩展模块：顾客档案/画像/AI 客服/客诉与补偿审批。
         # provider 由环境变量决定（无 key 时为离线规则层，CI 不依赖网络）；
         # guest_journal 与 config_journal 同构，凭证类数据重启不丢。
@@ -362,7 +386,8 @@ class AppState:
         )
         self.telemetry = TelemetryRing(self.config.history_points)
         self.audit = AuditLog(
-            None if var is None else var / "audit.jsonl", clock=self.wall
+            None if var is None else var / "audit.jsonl", clock=self.wall,
+            sql_sink=None if self.recorder is None else self.recorder.append_audit,
         )
         # 演示数据：订单、消毒会话、工单。单独一步，方便测试只装空壳
         self.demo = _DemoSeed(self)
@@ -535,7 +560,17 @@ class AppState:
                 "rule_id": verdict.rule_id, "event": verdict.event,
                 "message": verdict.message, "actions": list(verdict.actions),
             })
-        for ticket in self.health.due_escalations(now=self.wall()):
+        # 工单时间戳是 `self.now()`（单调秒，见 offline.tick → health.observe），
+        # 升级判定必须用同一个时钟域。两个坑都踩过（2026-11-18 云端实测）：
+        # 1. 传 `self.wall()`（epoch）→ `now >= due_at + 900` 永远成立，工单一开
+        #    就立刻「超时升级」，超期时长还会算出几千万分钟的荒谬值；
+        # 2. 只发事件不调 `escalate()` → `escalated_at` 一直是 None，
+        #    `is_due_for_escalation` 每帧都成立，同一张单每秒发 3 行进
+        #    `alarm_events`，跑一天 26 万行，30 GB 盘迟早撑爆。
+        # 正确语义：开单 30 分钟没人接单 → 升级一次（L1→L2），之后不再重复。
+        moment = self.now()
+        for ticket in self.health.due_escalations(now=moment):
+            self.health.escalate(ticket.id, now=moment)
             self._emit("fault-escalate", ticket.to_payload())
 
     def _emit(self, kind: str, body: dict[str, Any]) -> dict[str, Any]:
@@ -562,6 +597,14 @@ class AppState:
         merged = dict(body or {})
         merged.update(extra)
         return self._emit(kind, merged)
+
+    def _persist_order(self, order: Any, event: Any) -> None:
+        """订单写路径的落库旁路（A23）：每条 order_events 落地时，
+        订单/子项快照 UPSERT + 事件追加。失败在写器内计数，不抛。"""
+        if self.recorder is None:
+            return
+        self.recorder.persist_order(order)
+        self.recorder.append_order_event(event)
 
     def journal_config(self, record: dict[str, Any]) -> bool:
         """配置写操作落盘（跨重启重放）。写失败返回 False，由调用方提示。"""
@@ -716,7 +759,7 @@ class AppState:
             "runtime": self.runtime.snapshot(),
             "offline": self.offline.snapshot(now=self.now()),
             "queue": self.queue.snapshot() if hasattr(self.queue, "snapshot") else {},
-            "health": self.health.snapshot(now=self.wall()),
+            "health": self.health.snapshot(now=self.now()),
             "audit": self.audit.snapshot(),
             "ticks": self._ticks,
             "online": self._online,

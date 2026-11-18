@@ -139,6 +139,12 @@ class ApiServer:
         self.login = LoginService(self.signer, self.accounts)
         self.router = Router(state, login=self.login)
         self.static_dir = Path(static_dir).resolve() if static_dir else None
+        # 客诉图片证据落盘目录：优先用 state 的 var_dir，退化到系统临时目录。
+        from ..guest.uploads import ImageStore
+        var_dir = getattr(getattr(state, "config", None), "var_dir", None)
+        upload_root = (Path(var_dir) / "uploads") if var_dir else (
+            Path(__import__("tempfile").gettempdir()) / "kitchen-uploads")
+        self.images = ImageStore(upload_root)
         self.allow_origin = str(allow_origin or "")
         self.sse_budget = _SseBudget(sse_limit)
         self._httpd = httpd_cls((host, int(port)), _make_handler(self))
@@ -307,6 +313,10 @@ def _make_handler(server: ApiServer):
             if parsed.path == "/api/customer/trace/label.png":
                 self._trace_label(query)
                 return
+            # 客诉图片证据：二进制端点，绕过 Router 的 JSON 包装
+            if parsed.path == "/api/customer/guest/evidence-image":
+                self._evidence_image(query)
+                return
             if parsed.path.startswith("/api/"):
                 session = self._session(query)
                 data = {key: values[0] if len(values) == 1 else values
@@ -319,6 +329,10 @@ def _make_handler(server: ApiServer):
             self._static(parsed.path)
 
         def do_POST(self) -> None:  # noqa: N802
+            # 客诉图片上传：二进制 body，不走 JSON Router。
+            if urlparse(self.path).path == "/api/customer/guest/evidence-upload":
+                self._evidence_upload()
+                return
             self._mutate("POST")
 
         def do_PUT(self) -> None:  # noqa: N802
@@ -374,6 +388,67 @@ def _make_handler(server: ApiServer):
             self.send_header("Content-Length", str(len(raw)))
             # 标签图不变（码即内容），可以缓存；但演示里改 url_template 会重贴
             self.send_header("Cache-Control", "no-cache")
+            self._cors()
+            self.end_headers()
+            if self.command != "HEAD":
+                self.wfile.write(raw)
+
+        # ---------------------------------------------------- 客诉图片证据
+        def _evidence_upload(self) -> None:
+            """上传图片证据：顾客令牌 + guest_key 双因子校验。
+
+            兼容两种 body：小程序 `wx.uploadFile` 的 multipart/form-data
+            （取 `image` 字段），以及脚本/测试发的裸二进制 octet-stream。
+            """
+            from ..guest.uploads import (
+                MAX_UPLOAD_BYTES, UploadError, extract_multipart_file,
+            )
+
+            parsed = urlparse(self.path)
+            query = parse_qs(parsed.query, keep_blank_values=True)
+            token = (query.get("customer_token") or query.get("token") or [""])[0]
+            guest_key = (query.get("guest_key") or [""])[0]
+            # 也认请求头：小程序 wx.uploadFile 的 formData 走 multipart，
+            # 令牌放 header 就不必依赖 multipart 解析就能鉴权
+            token = self.headers.get("X-Customer-Token", "") or token
+            guest_key = self.headers.get("X-Guest-Key", "") or guest_key
+            try:
+                server.state.customer.require_guest(token, guest_key)
+                length = int(self.headers.get("Content-Length") or 0)
+                # multipart 有 boundary/头部开销，放宽一点上限；真正落盘前
+                # ImageStore.save 仍按 2MB 校验图片本体
+                if length <= 0 or length > MAX_UPLOAD_BYTES + 64 * 1024:
+                    raise UploadError("图片为空或超过 2MB 上限")
+                raw = self.rfile.read(length)
+                content_type = self.headers.get("Content-Type", "")
+                if content_type.lower().startswith("multipart/form-data"):
+                    raw = extract_multipart_file(raw, content_type, field="image")
+                url = server.images.save(raw)
+            except UploadError as exc:
+                self._send_json(400, {"ok": False, "error": "BadRequest",
+                                      "detail": str(exc)})
+                return
+            except Exception as exc:  # noqa: BLE001 - 令牌无效等统一 400
+                self._send_json(400, {"ok": False, "error": "Unauthorized",
+                                      "detail": str(exc)[:120]})
+                return
+            self._send_json(200, {"ok": True, "url": url})
+
+        def _evidence_image(self, query: dict[str, list[str]]) -> None:
+            name = (query.get("name") or [""])[0]
+            found = server.images.read(name)
+            if found is None:
+                self._send_json(404, {"ok": False, "error": "not_found",
+                                      "detail": "图片不存在"})
+                return
+            raw, ext = found
+            ctype = {"jpg": "image/jpeg", "png": "image/png",
+                     "webp": "image/webp", "gif": "image/gif"}.get(ext,
+                                                                    "image/jpeg")
+            self.send_response(200)
+            self.send_header("Content-Type", ctype)
+            self.send_header("Content-Length", str(len(raw)))
+            self.send_header("Cache-Control", "public, max-age=86400")
             self._cors()
             self.end_headers()
             if self.command != "HEAD":
@@ -533,6 +608,8 @@ def main(argv: list[str] | None = None) -> int:  # pragma: no cover - CLI 入口
     parser.add_argument("--offline", action="store_true", help="以离线模式启动")
     parser.add_argument("--allow-origin", default="", help="开发期 CORS 白名单")
     parser.add_argument("--no-seed", action="store_true", help="不造演示订单")
+    parser.add_argument("--seed-demo", action="store_true",
+                        help="即使运行时库已有订单，也再播种一批演示单（仅演示用）")
     parser.add_argument("--db", default="",
                         help="运行时库路径（A1；空 = 纯内存，如 var/runtime.db）")
     parser.add_argument("--db-url", default=os.environ.get("KITCHEN_DB_URL", ""),
@@ -565,8 +642,24 @@ def main(argv: list[str] | None = None) -> int:  # pragma: no cover - CLI 入口
         config=config,
         online=not args.offline,
     )
+    # 订单是内存态 + 写穿镜像：启动时内存为空、自增游标回到 1，而运行时库里
+    # 还留着上次运行的行。**必须先对齐游标**，否则重启后新单会拿 1、2、3 去
+    # UPSERT 覆盖历史订单（不报错、不留痕，数据静默丢失）。
+    prior_orders = 0
+    if state.recorder is not None:
+        max_order, max_item = state.recorder.order_id_bounds()
+        state.orders.align_ids(max_order, max_item)
+        prior_orders = max_order
     if not args.no_seed:
-        state.demo.seed_orders()
+        # 只在「库里还没有订单」时播种演示单（首次启动）。旧行为是每次启动都
+        # 造 3 单，于是容器每重启一次就多 3 条假单——答辩当天重启几次，订单
+        # 列表里全是时间对不上的脏数据，也不符合「生产系统不自己造假单」。
+        # 需要时可在界面点「生成演示订单」，或用 --seed-demo 强制播种。
+        if prior_orders == 0 or args.seed_demo:
+            state.demo.seed_orders()
+        else:
+            log.info("运行时库已有 %d 条订单快照，跳过自动播种演示单"
+                     "（需要就点「生成演示订单」或加 --seed-demo）", prior_orders)
     state.start()
 
     server = ApiServer(
