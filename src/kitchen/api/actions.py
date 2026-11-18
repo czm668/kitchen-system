@@ -19,11 +19,18 @@
 """
 from __future__ import annotations
 
+import json
 from datetime import datetime
 from typing import Any, Mapping
 
 from ..domain import CST
-from ..process.journal import journal_recipe_payload
+from ..process.journal import (
+    journal_batch_payload,
+    journal_ingredient_batch_payload,
+    journal_recipe_payload,
+    journal_supplier_payload,
+    journal_trace_payload,
+)
 from ..process.models import ItemState
 from .auth import Session, require
 
@@ -146,6 +153,7 @@ def create_dish(state, session: Session, params, body) -> dict[str, Any]:
         dish_id=new_id, code=code, name=name,
         category=str(body.get("category") or ""),
         price=float(body.get("price") or 0.0),
+        prep_minutes=max(0, int(body.get("prep_minutes") or 0)),
     )
     _audit(state, session, "recipe.dish", target=dish.code,
            after={"dish_id": dish.id, "name": dish.name}, detail="新建菜品")
@@ -153,11 +161,157 @@ def create_dish(state, session: Session, params, body) -> dict[str, Any]:
     archived = state.journal_config({
         "op": "dish", "code": dish.code, "name": dish.name,
         "category": dish.category, "price": dish.price,
+        "prep_minutes": dish.prep_minutes,
     })
     return {"dish_id": dish.id, "code": dish.code, "name": dish.name,
             "note": "新菜品还没有配方，请在右侧录入配料与工序后保存 v1"
                     if archived else
                     "新菜品已生效；但配置归档失败，服务重启后会丢失"}
+
+
+# --------------------------------------------------------------------- 溯源录入
+def save_supplier(state, session: Session, params, body) -> dict[str, Any]:
+    """新增/编辑供应商。id 省略则现算（max+1），带 id 则更新既有行。"""
+    require(session.role, "recipe.write")
+    name = str(body.get("name") or "").strip()
+    if not name:
+        raise ValueError("供应商名称必填")
+    sid = body.get("id")
+    sid = int(sid) if sid not in (None, "") else max(
+        (int(row.get("id") or 0) for row in state.repo.suppliers())) + 1
+    before = None
+    try:
+        before = dict(state.repo.supplier(sid))
+    except Exception:  # noqa: BLE001 - 新增时不存在是正常的
+        pass
+    row = {
+        "id": sid, "name": name,
+        "license_no": str(body.get("license_no") or "").strip() or None,
+        "contact": str(body.get("contact") or "").strip(),
+        "qualifications": list(body.get("qualifications") or []),
+        "state": str(body.get("state") or "active"),
+    }
+    state.repo.put_supplier(sid, row)
+    _audit(state, session, "trace.supplier", target=name,
+           before=before, after=row, detail="保存供应商")
+    archived = state.journal_config(journal_supplier_payload(row))
+    return {"id": sid, "name": name,
+            "note": "已保存" if archived else "已生效；但配置归档失败，重启会丢失"}
+
+
+def save_batch(state, session: Session, params, body) -> dict[str, Any]:
+    """新增/编辑食材批次。批次号必填且唯一，菜品外键必存在。"""
+    require(session.role, "recipe.write")
+    batch_no = str(body.get("batch_no") or "").strip()
+    if not batch_no:
+        raise ValueError("批次号必填")
+    dish_id = int(body.get("dish_id") or 0)
+    state.repo.dish(dish_id)  # 外键校验，先于任何写入
+    bid = body.get("id")
+    bid = int(bid) if bid not in (None, "") else max(state.repo.batch_ids(), default=0) + 1
+    before = None
+    try:
+        old = state.repo.batch(bid)
+        before = {k: (v.strftime("%Y-%m-%d %H:%M:%S") if isinstance(v, datetime) else v)
+                  for k, v in old.items()}
+    except Exception:  # noqa: BLE001
+        pass
+    row = {
+        "id": bid, "batch_no": batch_no, "dish_id": dish_id,
+        "produced_at": body.get("produced_at"),
+        "expire_at": body.get("expire_at"),
+        "state": str(body.get("state") or "produced"),
+    }
+    state.repo.put_batch(bid, row)
+    _audit(state, session, "trace.batch", target=batch_no,
+           before=before, after=row, detail="保存批次")
+    archived = state.journal_config(journal_batch_payload(row))
+    return {"id": bid, "batch_no": batch_no,
+            "note": "已保存" if archived else "已生效；但配置归档失败，重启会丢失"}
+
+
+def save_ingredient_batch(state, session: Session, params, body) -> dict[str, Any]:
+    """新增/编辑原料批次——溯源主体（这批肉/菜从哪来、谁供的、检疫结果）。
+
+    与成品批次分开：成品批次供留样/出库门禁，原料批次供顾客扫码追溯来源。
+    供应商外键必存在；时间由仓储归一化成带时区 datetime，避免 str/datetime 混用。
+    """
+    require(session.role, "recipe.write")
+    batch_no = str(body.get("batch_no") or "").strip()
+    if not batch_no:
+        raise ValueError("原料批次号必填")
+    ingredient_name = str(body.get("ingredient_name") or "").strip()
+    if not ingredient_name:
+        raise ValueError("原料名称必填")
+    supplier_id = int(body.get("supplier_id") or 0)
+    state.repo.supplier(supplier_id)  # 外键校验先于写入
+    bid = body.get("id")
+    bid = int(bid) if bid not in (None, "") else max(
+        state.repo.ingredient_batch_ids(), default=0) + 1
+    before = None
+    try:
+        old = state.repo.ingredient_batch(bid)
+        before = {k: (v.strftime("%Y-%m-%d %H:%M:%S") if isinstance(v, datetime) else v)
+                  for k, v in old.items()}
+    except Exception:  # noqa: BLE001
+        pass
+    inspection = body.get("inspection")
+    if isinstance(inspection, str):
+        try:
+            inspection = json.loads(inspection)
+        except (ValueError, TypeError):
+            inspection = {}
+    row = {
+        "id": bid,
+        "batch_no": batch_no,
+        "ingredient_name": ingredient_name,
+        "supplier_id": supplier_id,
+        "received_at": body.get("received_at"),
+        "expire_at": body.get("expire_at"),
+        "inspection": dict(inspection) if isinstance(inspection, dict) else {},
+        "state": str(body.get("state") or "received"),
+    }
+    state.repo.put_ingredient_batch(bid, row)
+    _audit(state, session, "trace.ingredient_batch", target=batch_no,
+           before=before, after={k: (v.strftime("%Y-%m-%d %H:%M:%S")
+                                      if isinstance(v, datetime) else v)
+                                 for k, v in row.items()},
+           detail="保存原料批次")
+    archived = state.journal_config(journal_ingredient_batch_payload(row))
+    return {"id": bid, "batch_no": batch_no,
+            "note": "已保存" if archived else "已生效；但配置归档失败，重启会丢失"}
+
+
+def save_trace(state, session: Session, params, body) -> dict[str, Any]:
+    """新增/编辑溯源码。code 是业务唯一键，批次/供应商外键按需校验。"""
+    require(session.role, "recipe.write")
+    code = str(body.get("code") or "").strip().upper()
+    if not code:
+        raise ValueError("溯源码必填")
+    tid = body.get("id")
+    tid = int(tid) if tid not in (None, "") else max(
+        (int(dict(row).get("id") or 0) for _c, row in state.repo.trace_rows())) + 1
+    before = None
+    try:
+        old = state.repo.trace_code(code)
+        # 审计记录要能 JSON 序列化：仓储里的 created_at 是 datetime，先转字符串
+        before = {k: (v.strftime("%Y-%m-%d %H:%M:%S") if isinstance(v, datetime) else v)
+                  for k, v in old.items()}
+    except Exception:  # noqa: BLE001
+        pass
+    row = {
+        "id": tid, "code": code,
+        "batch_id": body.get("batch_id") or None,
+        "supplier_id": body.get("supplier_id") or None,
+        "payload": dict(body.get("payload") or {}),
+        "created_at": body.get("created_at") or datetime.now(CST).strftime("%Y-%m-%d %H:%M:%S"),
+    }
+    state.repo.put_trace_code(code, row)
+    _audit(state, session, "trace.code", target=code,
+           before=before, after=row, detail="保存溯源码")
+    archived = state.journal_config(journal_trace_payload(row))
+    return {"code": code, "id": tid,
+            "note": "已保存" if archived else "已生效；但配置归档失败，重启会丢失"}
 
 
 def save_recipe_version(state, session: Session, params, body) -> dict[str, Any]:
@@ -669,6 +823,10 @@ ACTIONS: dict[str, Any] = {
     "channel.review": channel_review,
     "recipe.version": save_recipe_version,
     "recipe.dish": create_dish,
+    "trace.supplier": save_supplier,
+    "trace.batch": save_batch,
+    "trace.ingredient_batch": save_ingredient_batch,
+    "trace.code": save_trace,
     "param.save": save_params,
     "param.time_scale": set_time_scale,
     "network.set": set_online,

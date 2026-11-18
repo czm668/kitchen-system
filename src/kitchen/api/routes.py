@@ -227,6 +227,14 @@ class Router:
 
         # ---------------- A7-06 批次与人员
         self.add("GET", "/api/batches", self._view("batch_view"))
+        self.add("POST", "/api/trace/suppliers",
+                 self._action("trace.supplier"), permission="recipe.write")
+        self.add("POST", "/api/trace/batches",
+                 self._action("trace.batch"), permission="recipe.write")
+        self.add("POST", "/api/trace/ingredient-batches",
+                 self._action("trace.ingredient_batch"), permission="recipe.write")
+        self.add("POST", "/api/trace/codes",
+                 self._action("trace.code"), permission="recipe.write")
         self.add("GET", "/api/staff", self._view("staff_view"))
         self.add("GET", "/api/staff/certificates", self._view("certificate_view"))
         self.add("GET", "/api/morning", self._view("morning_view"))

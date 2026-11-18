@@ -111,6 +111,8 @@ class TestApiPaths:
             # 管理端只做审批（对应 POST 已在 GuestView.vue 里有入口）
             "/api/customer/guest/complaints",
             "/api/customer/guest/complaints/{complaint_id}/supplement",
+            # 对话式客服（小程序 chat 页调用，管理端无入口）
+            "/api/customer/guest/chat",
         }
         used = set(_frontend_calls())
         missing = [

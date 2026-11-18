@@ -114,12 +114,16 @@ class AuditLog:
         *,
         capacity: int = 2000,
         clock: Any = None,
+        sql_sink: Any = None,
     ) -> None:
         if capacity < 1:
             raise ValueError("capacity 至少为 1")
         self.path = Path(path) if path is not None else None
         self.capacity = int(capacity)
         self._clock = clock or time.time
+        #: SQL 双写旁路（A23）：JSONL 仍是权威留痕，audit_logs 表供跨重启
+        #: SQL 查询与库体检。写失败在写器内计数，不影响内存主路径。
+        self._sql_sink = sql_sink
         self._entries: deque[AuditEntry] = deque(maxlen=self.capacity)
         self._next_id = 1
         self.write_failures = 0
@@ -194,6 +198,11 @@ class AuditLog:
             self.dropped += 1
         self._entries.append(entry)
         self._append_file(entry)
+        if self._sql_sink is not None:
+            try:
+                self._sql_sink(entry)
+            except Exception:  # pragma: no cover - 写器内已吞错，双保险
+                log.warning("审计 SQL 双写异常（#%d）", entry.id, exc_info=True)
         return entry
 
     def _append_file(self, entry: AuditEntry) -> None:

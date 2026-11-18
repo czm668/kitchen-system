@@ -109,7 +109,9 @@ class TestViews:
     def test_批次与溯源码(self, server, admin):
         data = data_of(server, "GET", "/api/batches", session=admin)
         assert data["total"] >= 1
-        assert data["trace_codes"] >= 1
+        assert len(data["trace_codes"]) >= 1  # 完整行，供管理端编辑
+        assert data["trace_codes_total"] >= 1
+        assert isinstance(data["suppliers"], list) and data["suppliers"]
 
     def test_KPI无样本时不下发0(self, server, admin):
         """**「0」和「没有样本」必须分开**：显示「出餐 0 分钟」是能被当场问住的。"""

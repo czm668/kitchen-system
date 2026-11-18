@@ -396,9 +396,38 @@ def batch_view(state, query: dict[str, Any]) -> dict[str, Any]:
             except Exception:  # noqa: BLE001
                 payload["supplier_name"] = ""
         batches.append(payload)
-    trace = [{"code": code, "row": dict(row)}
-             for code, row in state.repo.trace_rows()]
-    return {"total": len(batches), "batches": batches, "trace_codes": len(trace)}
+    trace = [dict(row, code=code) for code, row in state.repo.trace_rows()]
+    suppliers = [dict(row) for row in state.repo.suppliers()]
+    # 原料批次：溯源主体。时间转字符串，免得 datetime 进 JSON 炸序列化。
+    def _stamp(value: object) -> str:
+        return value.strftime("%Y-%m-%d %H:%M") if isinstance(value, datetime) else (
+            str(value) if value else "")
+
+    ingredient_batches = []
+    for batch_id in state.repo.ingredient_batch_ids():
+        row = state.repo.ingredient_batch(batch_id)
+        supplier_name = ""
+        try:
+            supplier_name = state.repo.supplier(int(row.get("supplier_id") or 0)).get("name", "")
+        except Exception:  # noqa: BLE001
+            pass
+        ingredient_batches.append({
+            "id": batch_id,
+            "batch_no": str(row.get("batch_no") or ""),
+            "ingredient_name": str(row.get("ingredient_name") or ""),
+            "supplier_id": row.get("supplier_id"),
+            "supplier_name": supplier_name,
+            "received_at": _stamp(row.get("received_at")),
+            "expire_at": _stamp(row.get("expire_at")),
+            "inspection": dict(row.get("inspection") or {}),
+            "state": str(row.get("state") or "received"),
+        })
+    return {
+        "total": len(batches), "batches": batches,
+        "suppliers": suppliers, "trace_codes": trace,
+        "trace_codes_total": len(trace),
+        "ingredient_batches": ingredient_batches,
+    }
 
 
 def certificate_view(state, query: dict[str, Any]) -> dict[str, Any]:
