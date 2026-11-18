@@ -3,7 +3,103 @@
 > 定稿题目《基于 ESP32 的后厨智能调度与食安合规管理系统的设计与实现》
 > 从零建立的独立工程 · 2026-11-12 起
 
-## 这是什么
+把后厨的**安全判定**和**食安台账**做成一套断网也能跑的边缘系统：ESP32 采 12 路信号，
+领域内核在**同一帧内**完成燃气/明火/冷链/温湿度的判定与互锁处置，不依赖任何网络调用；
+管理端、小程序、TFT 终端三端读同一份事实。
+
+**在线演示**：http://101.37.82.186 （阿里云 1 GiB 试用实例，到期即下线；管理端需口令，
+顾客点餐与小程序链路可直接体验。部署过程见 [`deploy/README.md`](deploy/README.md)）
+
+**技术栈**：Python 3.11（运行时零第三方依赖，标准库 `http.server` + 自研 Router）·
+MySQL 8.4 / SQLite（可插拔）· Vue 3 + Vite · 原生微信小程序 · Docker Compose
+
+## 它解决什么
+
+| 后厨的真实问题 | 本项目的做法 |
+|---|---|
+| 燃气泄漏、明火离人、冷链失温——事后才发现 | 12 路信号 1 帧/秒进内核，判定 → 互锁 → 处置在同帧内完成；断网只影响上报，不影响关阀 |
+| 食安台账靠手写，溯源查不到批次 | 51 张表覆盖人员准入、过程执行、留样销毁、批次溯源，扫码即可回溯到供应商与效期 |
+| 顾客问「我的菜到哪了」只能催服务员 | 小程序看实时进度、催菜直达厨房；智能客服先分意图，能当场办的就不建工单 |
+
+## 架构
+
+```mermaid
+flowchart TB
+  subgraph E["端侧"]
+    ESP["ESP32 + TFT 终端"]
+    MP["微信小程序（9 页）"]
+    WEB["Vue 3 管理端（12 视图）"]
+  end
+  subgraph S["服务端（单进程）"]
+    API["HTTP API：93 个接口"]
+    CORE["领域内核：安全判定 / 人员准入 / 过程执行 / 客服"]
+    ST["AppState：内存态 + 事件流（SSE）"]
+  end
+  DB[("MySQL 8.4 或 SQLite")]
+  ESP --> API
+  MP --> API
+  WEB --> API
+  API --> CORE --> ST --> DB
+  ST -.->|断网只影响上报| ESP
+```
+
+判定链按「保护 → 规则 → 互锁 → 入队 → 降级 → 健康监视」串行执行，**帧内不做任何网络 IO**；
+存储层是同一套接口的三种实现（内存 / SQLite / MySQL），换库不改业务代码。
+
+## 值得展开的四处设计
+
+1. **帧内零网络 IO**：燃气突变、明火离人的处置不经过任何 HTTP/MQTT 调用，实测燃气与超温
+   处置 0.0s、明火离人判定 12s（含视觉 AND 与工位锁），误报 0。网络只用于上报与看板。
+2. **三端共享同一份事实**：`AppState` 是唯一事实源，管理端 SSE、小程序轮询、TFT 终端读的是
+   同一份快照，不存在「大屏说正常、手机说告警」。
+3. **跨重启一致性**：订单是内存态 + 写穿镜像，重启后自增游标会归零并覆盖历史行——启动时
+   按库里 `MAX(id)` 对齐游标；事件 `seq` 不重号；断网补传按业务键去重。
+4. **可复跑的验收**：`tools/verify-cloud.sh`（部署后 10 项自检）、`tools/miniapp_cloud_check.py`
+   （按 `wx.request` 口径从外网打 24 项）、`tools/ci.py`（单测 + 迁移校验 + 前端契约）。
+   不靠「打开看看能用」，每条结论都有命令可复现。
+
+## 规模
+
+| 维度 | 数字 |
+|---|---|
+| 领域代码 | 103 个模块 / 31,683 行 Python（运行时零第三方依赖） |
+| 数据 | 51 张表 · 19 个版本化迁移 · 4 张核心状态机 |
+| 接口 | 93 个 HTTP 接口（主路由 65 + 扩展 28） |
+| 测试 | 1458 项 pytest，覆盖判定边界、状态机、存储双后端、接口契约 |
+| 前端 | Vue 3 管理端 12 视图；小程序 9 页 |
+| 部署 | Docker Compose 三容器，阿里云 1 GiB 实测共占 206 MB |
+
+## 快速开始
+
+```bash
+# 1) 单测（1458 项，纯标准库，不装任何依赖）
+python -m pytest -q
+
+# 2) 本地 CI：单测 + 迁移校验 + 前端契约 + 小程序自检
+python tools/ci.py
+
+# 3) 起服务：API 同源托管前端构建产物，浏览器打开 http://127.0.0.1:8848/
+python -m kitchen.api.server --static web/dist
+```
+
+更多命令（离线仿真、MQTT 真链路、TFT 终端、管理端 dev 模式）见下方《快速开始》原文。
+
+## 部署
+
+一键脚本与逐条说明都在 [`deploy/README.md`](deploy/README.md)：`docker-compose.1g.yml` 是
+1 GiB 机型的生产口径（MySQL buffer pool 64M、关 performance_schema、40 连接），
+`gen-env.sh` 生成口令，`verify-cloud.sh` 做上线自检。文档里同时记了六个只有真跑起来
+才会暴露的坑（镜像缺 `cryptography` 导致认证失败、`docker-entrypoint-initdb.d` 只在空卷
+执行、`.dockerignore` 排掉 `web/` 却仍返回 200 等）。
+
+## 已知边界
+
+- **硬件未整机装配**：驱动、三通道互锁、失联降级都有单测与仿真回放，但没有一块焊好的板子。
+- **视觉模型未训练**：明火/离人链路是通的，演示时用脚本注入检测结果，不声称有训练好的模型。
+- **小程序未发正式版**：试用实例开不了备案服务号，缺备案域名 + HTTPS；开发模式与真机预览可用。
+- **支付未接入**：客诉补偿只生成凭证与审批记录，不对接支付渠道。
+
+## 工程缘起（开发笔记）
 
 这里是**新选题唯一的开发目录**。旧的 `毕设项目/02_项目代码/proj/` 不再改动，降级为**只读素材库**——
 里面 644 个文件中有 400 个是旧选题资产（明厨亮灶场景、厨师帽数据集、旧页面验收脚本），
@@ -110,7 +206,7 @@ kitchen-system/                     ← 毕设项目根（文档 + 代码分开�
 │       │   ├── vision_dataset.yaml        视觉数据集配置（names 顺序 = 模型 class id）
 │       │   └── seed_kitchen.sql           种子数据（工位/菜品配方SOP/员工工牌/监测点阈值）
 │       ├── firmware/esp32cam/         ESP32-CAM MJPEG 推流（草图，未编译；引脚表+供电规范）
-│       ├── tests/                     1268 条单测（含 MQTT 链路 6 条、调度器 9 条、prod 安全 4 条）
+│       ├── tests/                     1458 条单测（含 MQTT 链路 6 条、调度器 9 条、prod 安全 4 条）
 │       │   └── fixtures/qr_golden.json    二维码基准哈希（满容量用例由 segno 逐掩码比对确认）
 │       ├── tools/
 │       │   ├── legacy.py                  旧目录素材取用器（list / fetch / verify / check）
@@ -162,14 +258,14 @@ web/
 
 ## 快速开始
 
-> 本机是便携版 Python（`python311._pth` 模式，`-m` 不会自动加当前目录），
-> 所以下面统一用**脚本直跑**，在**代码工程根**（`02_项目代码/kitchen/`）执行。
+> 在**代码工程根**执行。本机开发用的是便携版 Python（`python311._pth` 模式，`-m` 不会
+> 自动加当前目录），所以示例统一用变量 `PY` 指解释器；换成系统的 `python` 同样可行。
 
 ```bash
-PY="D:/liulan1/毕设/.local/python311/python.exe"
-cd "D:/liulan1/毕设/kitchen-system/02_项目代码/kitchen"
+PY="python"     # 本机便携版：D:/liulan1/毕设/.local/python311/python.exe
+cd "02_项目代码/kitchen"
 
-# 跑全部单测（1268 条）
+# 跑全部单测（1458 条）
 # MQTT 真链路演示（A2）：python tools/mqtt_demo.py --amqtt
 "$PY" -m pytest -q
 
@@ -226,7 +322,7 @@ python tools/miniapp_netcheck.py     # 网络体检（报「网络不可用」�
 ## 跑 TFT 终端演示（A8）
 
 ```bash
-cd "D:/liulan1/毕设/kitchen-system/02_项目代码/kitchen"
+cd "02_项目代码/kitchen"
 "$PY" tools/tft_demo.py          # 九段全链路：上线→新单→刷卡→工序→断网→恢复→出餐
 "$PY" tools/tft_demo.py --quiet  # 只看结论
 ```
@@ -234,7 +330,7 @@ cd "D:/liulan1/毕设/kitchen-system/02_项目代码/kitchen"
 ## 跑管理端（A7）
 
 ```bash
-cd "D:/liulan1/毕设/kitchen-system/02_项目代码/kitchen"
+cd "02_项目代码/kitchen"
 
 # 1) 验收自检（构建产物 / 8 页数据链路 / 21 个写接口，共 29 项）
 "$PY" tools/web_check.py
