@@ -8,6 +8,14 @@ on:
     branches: [main, master]
   pull_request:
 
+# 同一分支连推时取消上一次运行，别让几个 run 排队白跑
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
 jobs:
   test:
     runs-on: ubuntu-latest

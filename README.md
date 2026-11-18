@@ -1,4 +1,8 @@
-# kitchen-system — 后厨智能调度与食安合规管理系统（新工程）
+# kitchen-system — 后厨智能调度与食安合规管理系统
+
+[![ci](https://github.com/czm668/kitchen-system/actions/workflows/ci.yml/badge.svg)](https://github.com/czm668/kitchen-system/actions/workflows/ci.yml)
+[![python](https://img.shields.io/badge/python-3.11-3776ab)](pyproject.toml)
+[![tests](https://img.shields.io/badge/tests-1458-brightgreen)](tests)
 
 > 定稿题目《基于 ESP32 的后厨智能调度与食安合规管理系统的设计与实现》
 > 从零建立的独立工程 · 2026-11-12 起
@@ -54,7 +58,7 @@ flowchart TB
    同一份快照，不存在「大屏说正常、手机说告警」。
 3. **跨重启一致性**：订单是内存态 + 写穿镜像，重启后自增游标会归零并覆盖历史行——启动时
    按库里 `MAX(id)` 对齐游标；事件 `seq` 不重号；断网补传按业务键去重。
-4. **可复跑的验收**：`tools/verify-cloud.sh`（部署后 10 项自检）、`tools/miniapp_cloud_check.py`
+4. **可复跑的验收**：`deploy/verify-cloud.sh`（部署后 10 项自检）、`tools/miniapp_cloud_check.py`
    （按 `wx.request` 口径从外网打 24 项）、`tools/ci.py`（单测 + 迁移校验 + 前端契约）。
    不靠「打开看看能用」，每条结论都有命令可复现。
 
@@ -78,7 +82,7 @@ python -m pytest -q
 # 2) 本地 CI：单测 + 迁移校验 + 前端契约 + 小程序自检
 python tools/ci.py
 
-# 3) 起服务：API 同源托管前端构建产物，浏览器打开 http://127.0.0.1:8848/
+# 3) 起服务（先 pip install -e . 或设 PYTHONPATH=src），浏览器打开 http://127.0.0.1:8848/
 python -m kitchen.api.server --static web/dist
 ```
 
