@@ -30,8 +30,9 @@ class TestSession:
         assert first["customer_token"] != second["customer_token"]
         assert len(first["customer_token"]) >= 16
 
-    def test_令牌重启后失效(self, tmp_path):
-        """内存令牌：换一个 state 就无效——文档已声明，这条测试把口径钉死。
+    def test_换var目录令牌失效(self, tmp_path):
+        """令牌摘要持久化在各自 var_dir：换一个目录（相当于换一套数据）就查不到。
+        同目录重启后令牌仍有效——见 TestSessionPersistence。
         注意**不调 stop()**：`make_server` 不起 serve 线程，`shutdown()` 会
         永久阻塞（http.server 的经典坑）。"""
         first = make_server(tmp_path)
@@ -46,6 +47,94 @@ class TestSession:
         status, payload = call(server, "GET", "/api/customer/orders")
         assert status == 401
         assert "重新开桌" in payload.get("detail", "")
+
+
+class TestSessionPersistence:
+    """顾客会话跨重启持久化：token 与订单归属不丢（否则重启后顾客看不到自己的单）。"""
+
+    def test_同目录重启后令牌仍有效且会话档案恢复(self, tmp_path):
+        """重启后令牌不再 401，脱敏编号/桌号/guest_key 随会话恢复。
+
+        边界：裸 order_id 归属**刻意不回放**——订单本体纯内存、id 每进程
+        从 seed 重分配，回放旧 id 会撞号造成越权催菜。订单能否显示取决于
+        订单系统自身的持久化，是另一个设计边界；这里保证的是会话层不 401。
+        """
+        first = make_server(tmp_path)
+        session = data_of(first, "POST", "/api/customer/session",
+                          table_id=3, guest_key="gk-persist")
+        token = session["customer_token"]
+        menu = data_of(first, "GET", "/api/customer/menu")
+        code = menu["dishes"][0]["code"]
+        data_of(first, "POST", "/api/customer/orders",
+                customer_token=token, items=[{"code": code, "qty": 1}])
+
+        # 同一 var_dir 重建 = 模拟服务重启
+        second = make_server(tmp_path)
+        status, payload = call(second, "GET", "/api/customer/orders",
+                               customer_token=token)
+        assert status == 200, payload          # 关键：不再 401
+        after = payload["data"]
+        # 脱敏编号/桌号/guest_key 随会话恢复
+        assert after["customer_ref"] == session["customer_ref"]
+        assert after["table_id"] == 3
+        assert second.state.customer.profile_of(token)["guest_key"] == "gk-persist"
+        # 旧 order_id 不回放：新进程归属簿为空，绝不撞号
+        assert second.state.customer.order_ids_of(token) == set()
+        assert second.state.customer.journal_stats["applied"] >= 1
+
+    def test_重启后新订单归属不串到旧会话(self, tmp_path):
+        """回归：回放的旧 order_id 不得让新会话的催菜被误判为不属于自己。"""
+        first = make_server(tmp_path)
+        data_of(first, "POST", "/api/customer/session", guest_key="gk-old")
+        menu = data_of(first, "GET", "/api/customer/menu")
+        code = menu["dishes"][0]["code"]
+        # 旧会话下过一单（order_id=1 进了 journal）
+        s = data_of(first, "POST", "/api/customer/session", guest_key="gk-old2")
+        data_of(first, "POST", "/api/customer/orders",
+                customer_token=s["customer_token"],
+                items=[{"code": code, "qty": 1}])
+
+        second = make_server(tmp_path)
+        # 新进程里开新桌、下新单（id 从 seed 重新分配，大概率也是 1）
+        s2 = data_of(second, "POST", "/api/customer/session", guest_key="gk-new")
+        data_of(second, "POST", "/api/customer/orders",
+                customer_token=s2["customer_token"],
+                items=[{"code": code, "qty": 2}])
+        st, p = call(second, "GET", "/api/customer/orders",
+                     customer_token=s2["customer_token"])
+        item = p["data"]["orders"][0]["items"][0]
+        # 催自己的新单应成功，而不是被回放的旧归属撞成 404
+        st, p = call(second, "POST",
+                     f"/api/customer/orders/items/{item['id']}/urge",
+                     customer_token=s2["customer_token"])
+        assert st == 200, p
+
+    def test_重启后guest_key双因子校验仍生效(self, tmp_path):
+        first = make_server(tmp_path)
+        session = data_of(first, "POST", "/api/customer/session",
+                          guest_key="gk-right")
+        token = session["customer_token"]
+        second = make_server(tmp_path)
+        # 令牌对、guest_key 错 → 仍拒绝（持久化没削弱安全边界）
+        status, _ = call(second, "GET", "/api/customer/guest/profile",
+                         customer_token=token, guest_key="gk-wrong")
+        assert status == 401
+        status, payload = call(second, "GET", "/api/customer/guest/profile",
+                               customer_token=token, guest_key="gk-right")
+        assert status == 200, payload
+
+    def test_journal不落明文令牌(self, tmp_path):
+        first = make_server(tmp_path)
+        session = data_of(first, "POST", "/api/customer/session",
+                          guest_key="gk-noleak")
+        token = session["customer_token"]
+        menu = data_of(first, "GET", "/api/customer/menu")
+        data_of(first, "POST", "/api/customer/orders", customer_token=token,
+                items=[{"code": menu["dishes"][0]["code"], "qty": 1}])
+        journal = (tmp_path / "var" / "customer_journal.jsonl")
+        text = journal.read_text(encoding="utf-8")
+        assert token not in text, "journal 不得出现明文令牌"
+        assert "token_sha256" in text
 
 
 # ----------------------------------------------------------------- 菜单
@@ -63,6 +152,24 @@ class TestMenu:
     def test_菜单匿名可看(self, server):
         status, _ = call(server, "GET", "/api/customer/menu")
         assert status == 200
+
+    def test_全品类菜单分类齐全(self, server):
+        """全品类种子：7 大品类都有菜，前端据此自动生成分类导航。"""
+        data = data_of(server, "GET", "/api/customer/menu")
+        cats = {row["category"] for row in data["dishes"]}
+        assert {"热菜", "凉菜", "素菜", "汤羹", "主食", "甜品", "饮品"} <= cats
+        assert data["total"] >= 24
+
+    def test_过期批次菜标记下架并说明原因(self, server):
+        """酸辣土豆丝(D-SLTD)唯一批次 B-DEMO-004 已过期 → 菜单标沽清+原因。"""
+        rows = {r["code"]: r for r in data_of(server, "GET", "/api/customer/menu")["dishes"]}
+        sltd = rows["D-SLTD"]
+        assert sltd["sold_out"] is True
+        assert "保质期" in sltd["unavailable_reason"]
+        # 有新鲜批次的菜照常卖
+        assert rows["D-QJRS"]["sold_out"] is False
+        # 有新鲜批次的全品类菜照常卖（不因溯源信息被误判下架）
+        assert rows["D-HSJR"]["sold_out"] is False
 
 
 # ----------------------------------------------------------------- 下单
@@ -109,6 +216,18 @@ class TestPlace:
                                items=[{"code": "D-QJRS", "qty": 1}])
         assert status == 409
         assert "青椒肉丝" in payload.get("detail", "")
+
+    def test_过期批次菜下单被拦截(self, server):
+        """菜单隐藏还不够：直接调下单接口也拦，避免绕过菜单买到过期食材。"""
+        token = data_of(server, "POST", "/api/customer/session")["customer_token"]
+        status, payload = call(server, "POST", "/api/customer/orders",
+                               customer_token=token,
+                               items=[{"code": "D-SLTD", "qty": 1}])
+        assert status == 409
+        assert "酸辣土豆丝" in payload.get("detail", "")
+        # 确认没有污染归属簿：这单没成，查单应为空
+        mine = data_of(server, "GET", "/api/customer/orders", customer_token=token)
+        assert mine["total"] == 0
 
     def test_顾客单对员工可见_同一状态机(self, server, chef):
         """顾客下的单出现在员工 /api/orders 里（来源 miniapp）——

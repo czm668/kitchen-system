@@ -28,6 +28,9 @@ from __future__ import annotations
 
 from typing import Any, Callable
 
+from ..guest.llm import PROMPT_VERSION
+from ..guest import service as _guest_service
+
 __all__ = ["register_guest_routes", "CUSTOMER_GUEST_HANDLERS"]
 
 
@@ -73,6 +76,16 @@ def _c_submit(state, data: dict[str, Any]) -> dict[str, Any]:
     )
 
 
+def _c_chat(state, data: dict[str, Any]) -> dict[str, Any]:
+    """对话式客服：自然语言 → 分流 + 执行（催菜/查单/菜单/建工单）。"""
+    return state.guest.chat.send(
+        token=_token(data), guest_key=str(data.get("guest_key") or "").strip(),
+        text=data.get("text"),
+        order_id=data.get("order_id"), item_id=data.get("item_id"),
+        wants_refund=bool(data.get("wants_refund")),
+    )
+
+
 def _c_supplement(state, data: dict[str, Any]) -> dict[str, Any]:
     complaint = state.guest.supplement(
         _int(data.get("complaint_id") or data.get("id"), "complaint_id"),
@@ -88,6 +101,7 @@ CUSTOMER_GUEST_HANDLERS: dict[str, Callable] = {
     "profile": _c_profile,
     "complaints": _c_complaints,
     "submit": _c_submit,
+    "chat": _c_chat,
     "supplement": _c_supplement,
 }
 
@@ -111,7 +125,8 @@ def guest_llm_view(state, query: dict[str, Any]) -> dict[str, Any]:
         "total": len(runs), "runs": runs,
         "provider": {"mode": state.guest.provider.mode,
                      "model": state.guest.provider.model,
-                     "prompt_version": "guest-v1"},
+                     "prompt_version": PROMPT_VERSION,
+                     "dual_review": _guest_service.DUAL_REVIEW},
         "journal": state.guest.journal_stats,
     }
 
@@ -161,6 +176,20 @@ def guest_approve(state, session, params, data) -> dict[str, Any]:
     return {"complaint": payload}
 
 
+def guest_resolve(state, session, params, data) -> dict[str, Any]:
+    """管理员单人直通：核实+终审一步完成。"""
+    payload = state.guest.resolve(
+        _int(params.get("complaint_id"), "complaint_id"),
+        actor=session.subject if session else "unknown",
+        role=session.role if session else "",
+        expected_version=data.get("expected_version"),
+        method=str(data.get("compensation") or data.get("method") or "redo"),
+        note=str(data.get("note") or ""),
+        evidence_ids=data.get("evidence_ids"),
+    )
+    return {"complaint": payload}
+
+
 def guest_reject(state, session, params, data) -> dict[str, Any]:
     payload = state.guest.reject(
         _int(params.get("complaint_id"), "complaint_id"),
@@ -185,6 +214,7 @@ def guest_portrait_refresh(state, session, params, data) -> dict[str, Any]:
 GUEST_ACTIONS: dict[str, Callable] = {
     "review": guest_review,
     "approve": guest_approve,
+    "resolve": guest_resolve,
     "reject": guest_reject,
     "portrait": guest_portrait_refresh,
 }
@@ -220,6 +250,8 @@ def register_guest_routes(router) -> None:
                _cust("complaints"), anonymous=True)
     router.add("POST", "/api/customer/guest/complaints",
                _cust("submit"), anonymous=True)
+    router.add("POST", "/api/customer/guest/chat",
+               _cust("chat"), anonymous=True)
     router.add("POST", "/api/customer/guest/complaints/{complaint_id}/supplement",
                _cust("supplement"), anonymous=True)
 
@@ -232,6 +264,8 @@ def register_guest_routes(router) -> None:
                _act("review"), permission="guest.review")
     router.add("POST", "/api/guest/complaints/{complaint_id}/approve",
                _act("approve"), permission="guest.approve")
+    router.add("POST", "/api/guest/complaints/{complaint_id}/resolve",
+               _act("resolve"), permission="guest.resolve")
     router.add("POST", "/api/guest/complaints/{complaint_id}/reject",
                _act("reject"), permission="guest.review")
     router.add("POST", "/api/guest/profiles/{guest_key}/portrait",

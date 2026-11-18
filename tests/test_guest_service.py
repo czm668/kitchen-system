@@ -207,13 +207,29 @@ class TestApproval:
         assert approved["reviewer"] != approved["approver"]
         assert "不发生实际退款" in approved["compensation_note"]
 
-    def test_核实人与终审人不得同人(self, server, lead, manager):
+    def test_默认允许管理员单人核实加终审(self, server, lead, manager):
+        """默认单人直通：管理员核实后自己终审应放行（双人复核开关关闭）。"""
         _s, row = self._paid_complaint(server, manager)
         ids = [e["id"] for e in row["evidences"]]
         reviewed = data_of(
             server, "POST", f"/api/guest/complaints/{row['id']}/review",
             session=manager, evidence_ids=ids, expected_version=1)["complaint"]
-        # admin 自己核实又自己终审 → 拒绝；换 lead 核实则可放行
+        status, payload = call(
+            server, "POST", f"/api/guest/complaints/{row['id']}/approve",
+            session=manager, compensation="waive",
+            expected_version=reviewed["version"])
+        assert status == 200
+        assert payload["data"]["complaint"]["state"] == ComplaintState.APPROVED
+
+    def test_强制双人复核时核实人与终审人不得同人(self, server, lead, manager, monkeypatch):
+        """开关打开后恢复强约束：核实人≠终审人。"""
+        import kitchen.guest.service as svc
+        monkeypatch.setattr(svc, "DUAL_REVIEW", True)
+        _s, row = self._paid_complaint(server, manager)
+        ids = [e["id"] for e in row["evidences"]]
+        reviewed = data_of(
+            server, "POST", f"/api/guest/complaints/{row['id']}/review",
+            session=manager, evidence_ids=ids, expected_version=1)["complaint"]
         status, payload = call(
             server, "POST", f"/api/guest/complaints/{row['id']}/approve",
             session=manager, compensation="waive",
@@ -298,6 +314,40 @@ class TestIsolationAndReplay:
         assert len(second.state.guest.llm_runs(200)) == 0, "重放不能重新调用模型"
         assert second.state.guest.journal_stats["applied"] >= 2
         assert calls_before > 0
+
+    def test_客诉列表新单在前旧单在后(self, server):
+        """时效性排序：后提交的工单必须排在前面（曾按 id 升序导致新单沉底）。"""
+        s = _open(server)
+        first = _submit(server, s, text="第一个问题，等了很久还没上菜")
+        second = _submit(server, s, text="第二个问题，菜是凉的请处理")
+        rows = data_of(server, "GET", "/api/customer/guest/complaints",
+                       customer_token=s["customer_token"], guest_key=KEY)
+        nos = [c["complaint_no"] for c in rows["complaints"]]
+        assert nos[0] == second["complaint_no"], "新客诉应排在最前"
+        assert nos[-1] == first["complaint_no"], "旧客诉应沉在最后"
+
+    def test_重启后带补偿工单仍可单人直通(self, tmp_path):
+        """服务重启后运行时订单为空，资金护栏必须仍用落盘的快照放行。"""
+        first = make_server(tmp_path)
+        s = _open(first)
+        placed = _order(first, s["customer_token"])
+        _submit(first, s, text="菜里有异物，要求退款",
+                order_id=placed["order_id"], wants_refund=True,
+                evidences=[{"kind": "text", "content": "现场照片已交服务员"}])
+
+        second = make_server(tmp_path)  # 模拟重启：guest journal 回读，订单不回读
+        assert len(second.state.orders.orders()) == 0, "前置：运行时订单为空"
+        restored = second.state.guest.all_complaints()[0]
+        assert restored.amount > 0
+        assert restored.order_snapshot_amount == restored.amount > 0
+
+        admin = login(second, "admin")
+        done = data_of(
+            second, "POST", f"/api/guest/complaints/{restored.id}/resolve",
+            session=admin, compensation="waive", expected_version=restored.version,
+            note="重启后核实快照，直接处理")["complaint"]
+        assert done["state"] == ComplaintState.APPROVED
+        assert done["voucher_no"].startswith("V")
 
     def test_AI调用审计对齐llm_runs列名(self, server, manager):
         s = _open(server)

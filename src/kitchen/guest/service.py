@@ -42,7 +42,7 @@ from __future__ import annotations
 
 import json
 import logging
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace as dc_replace
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Iterable, Mapping
@@ -52,6 +52,7 @@ from kitchen.domain import (
 )
 from kitchen.process.journal import append_journal
 
+from .handler import analyze, compose_reply, urgent_actions
 from .llm import (
     COMPENSATIONS, TAGS, LLMProvider, RuleProvider, llm_run_row,
     run_guarded, sanitize_user_text,
@@ -67,6 +68,10 @@ SLA_SEC = 30 * 60
 #: 自动结案允许的分类：涉及食安/异物/服务态度一律转人工
 AUTO_CLOSE_CATEGORIES = ("上菜慢", "温度", "其他")
 EVIDENCE_KINDS = ("photo", "text", "order_item", "log")
+#: 双人复核开关。默认关闭——管理员可单人核实+终审（单人直通 resolve）。
+#: 生产场景可设 KITCHEN_DUAL_REVIEW=1 恢复「核实人≠终审人」的强约束。
+DUAL_REVIEW = str(__import__("os").environ.get(
+    "KITCHEN_DUAL_REVIEW", "")).strip().lower() in ("1", "true", "yes", "on")
 
 
 class GuestError(DomainError):
@@ -123,6 +128,10 @@ class Complaint:
     text: str
     wants_refund: bool
     amount: float
+    #: 下单时的订单/子项价格快照，随工单一起落盘。资金护栏以此为准，
+    #: 绝不读运行时 OrderService——订单只写库、启动不回读，服务重启后查不到，
+    #: 旧实现把「查不到」兜底成 cap=0，导致每笔带补偿的工单都被判「超额」。
+    order_snapshot_amount: float
     method: str
     state: str
     version: int
@@ -153,7 +162,9 @@ class Complaint:
             "table_id": self.table_id, "order_id": self.order_id,
             "item_id": self.item_id, "category": self.category,
             "text": self.text, "wants_refund": self.wants_refund,
-            "amount": self.amount, "method": self.method, "state": self.state,
+            "amount": self.amount,
+            "order_snapshot_amount": self.order_snapshot_amount,
+            "method": self.method, "state": self.state,
             "version": self.version,
             "created_at": self.created_at.isoformat(timespec="seconds"),
             "updated_at": self.updated_at.isoformat(timespec="seconds"),
@@ -175,6 +186,11 @@ class Complaint:
             item_id=row.get("item_id"), category=str(row["category"]),
             text=str(row["text"]), wants_refund=bool(row["wants_refund"]),
             amount=float(row.get("amount") or 0),
+            # 兼容改造前落盘的旧工单：那时没有独立快照字段，amount 本身就是快照
+            order_snapshot_amount=float(
+                row.get("order_snapshot_amount")
+                if row.get("order_snapshot_amount") is not None
+                else (row.get("amount") or 0)),
             method=str(row.get("method") or "none"), state=str(row["state"]),
             version=int(row.get("version") or 0),
             created_at=datetime.fromisoformat(row["created_at"]),
@@ -233,6 +249,9 @@ class GuestService:
         self._next_evidence = 1
         self._idem: dict[tuple[str, str], dict[str, Any]] = {}
         self._applied, self._skipped = self._replay()
+        # 对话式客服引擎：能直接办的（催菜/查单/问菜单）当场办，真投诉才建单
+        from .chat import ChatService
+        self.chat = ChatService(self)
 
     # ------------------------------------------------------------ 持久化
     def _persist(self, op: str, data: dict[str, Any]) -> bool:
@@ -387,12 +406,30 @@ class GuestService:
             raise NotFoundError(f"客诉 {complaint_id} 不存在")
         return found
 
+    @staticmethod
+    def _timeliness_key(c: Complaint) -> tuple[float, int]:
+        """时效性排序键：越新提交越靠前。
+
+        以前按 `id` 升序排，id 单调递增，结果新客诉沉在列表底部、旧的霸占
+        顶部——和「时效性是第一优先」完全相反。这里改成 created_at **降序**：
+        元组按升序比较，故取负时间戳；同一秒提交时 id 大的（后提交）在前。
+
+        刻意不用 updated_at：老工单被审批一下就把 updated_at 刷成当前时间、
+        冒到队首，看起来像「新投诉」，反而误导。要的是「新提交的在上面」。
+        """
+        try:
+            ts = float(c.created_at.timestamp())
+        except (AttributeError, OSError, ValueError, TypeError):
+            ts = 0.0
+        return (-ts, -int(c.id))
+
     def complaints_of(self, guest_key: str) -> tuple[Complaint, ...]:
-        return tuple(c for c in sorted(self._complaints.values(), key=lambda x: x.id)
+        return tuple(c for c in sorted(self._complaints.values(),
+                                       key=self._timeliness_key)
                      if c.guest_key == str(guest_key))
 
     def all_complaints(self) -> tuple[Complaint, ...]:
-        return tuple(sorted(self._complaints.values(), key=lambda x: x.id))
+        return tuple(sorted(self._complaints.values(), key=self._timeliness_key))
 
     @property
     def pending_count(self) -> int:
@@ -457,14 +494,32 @@ class GuestService:
 
         moment = self.state.to_datetime()
         evidence_rows = self._build_evidences(evidences or ())
-        profile = self._profiles.get(owner["guest_key"])
+        # 关联子项拿到的具体事实只用于「说人话」：菜名、状态、催菜次数都来自
+        # 订单域真实数据，模型/规则层不得自己编订单号或金额。
+        item_obj = None
+        if order is not None and item_id is not None and str(item_id).strip():
+            iid = int(item_id)
+            item_obj = next((x for x in order.items if x.id == iid), None)
         facts = {
             "text": clean_text, "wants_refund": bool(wants_refund),
             "injection_suspected": suspicious,
             "category_hint": "", "order_amount": amount,
+            "order_no": order.order_no if order else "",
+            "dish_name": item_obj.dish_name if item_obj else "",
+            "item_state": str(item_obj.state or "") if item_obj else "",
+            "urge_count": int(item_obj.urge_count or 0) if item_obj else 0,
         }
         result = run_guarded(self.provider, "support", facts)
         self._record_llm_run(result, "ok", result.degraded_reason)
+
+        # 上菜慢但顾客没点名子项：挑一道还没结束、催得最少的菜代他催厨房，
+        # 别让「已受理」停在纸面上。有明确 item_id 时绝不替顾客猜。
+        if (order is not None and item_obj is None
+                and result.category == "上菜慢"):
+            pending = [x for x in order.items
+                       if not getattr(x, "finished", False)]
+            if pending:
+                item_obj = min(pending, key=lambda x: (int(x.urge_count or 0), x.id))
 
         can_auto = (not wants_refund and not result.need_human
                     and not suspicious
@@ -481,15 +536,30 @@ class GuestService:
             category=result.category, text=clean_text,
             wants_refund=bool(wants_refund),
             amount=round(amount, 2) if wants_refund else 0.0,
+            order_snapshot_amount=round(amount, 2),
             method=method if wants_refund else "none",
             state=state, version=1, created_at=moment, updated_at=moment,
-            evidences=evidence_rows, ai_suggestion=result.to_dict(),
+            evidences=evidence_rows,
         )
+
+        # ---- 处理决策：判断阶段/卡点/超时 → 实际执行能自动完成的动作 ----
+        handling = analyze(complaint, order=order, item=item_obj,
+                           now=moment, sla_sec=SLA_SEC)
+        actions = self._execute_actions(complaint, handling, item=item_obj)
+        handling["actions"] = actions
+        handling["urgent"] = urgent_actions(handling)
+        # AI 若只给了「已转交值班人员」这类空话，用真实数据重写成具体答复
+        reply = compose_reply(result.reply, handling, actions)
+        result = dc_replace(result, reply=reply)
+        complaint.ai_suggestion = {
+            **result.to_dict(), "handling": dict(handling),
+        }
         self._next_id += 1
         self._record(complaint, "submit", actor="customer",
                      detail={"ai_mode": result.mode,
                              "auto_closed": can_auto,
-                             "injection_suspected": suspicious})
+                             "injection_suspected": suspicious,
+                             "actions": [x["type"] for x in actions]})
         self.save_complaint(complaint)
 
         payload = {
@@ -498,8 +568,15 @@ class GuestService:
             "ai_summary": result.summary, "ai_mode": result.mode,
             "need_human": result.need_human,
             "sla_minutes": SLA_SEC // 60,
-            "note": ("已由智能客服即时答复结案" if can_auto
-                     else "已转交值班组长核实证据，涉及补偿需管理人员确认"),
+            "stage": handling["stage"], "stage_label": handling["stage_label"],
+            "blocker": handling["blocker"], "blocker_owner": handling["blocker_owner"],
+            "overdue": handling["overdue"],
+            "sla_remain_min": handling["sla_remain_min"],
+            "actions": actions, "urgent": handling["urgent"],
+            "note": ("已由智能客服即时答复结案" if can_auto else
+                     f"当前环节：{handling['stage_label']}；"
+                     f"卡点：{handling['blocker'] or '无'}；"
+                     f"已执行 {len(actions)} 项处理动作"),
             "amount": complaint.amount,
         }
         self.state.emit("complaint", {
@@ -507,7 +584,11 @@ class GuestService:
             "guest_key": complaint.guest_key,
             "customer_ref": complaint.customer_ref,
             "category": complaint.category, "state": complaint.state,
-            "message": result.reply or "客诉已受理，等待人工核实",
+            "stage_label": handling["stage_label"],
+            "blocker": handling["blocker"],
+            "overdue": handling["overdue"],
+            "actions": [x["type"] for x in actions],
+            "message": result.reply or "客诉已受理",
         })
         self.state.audit.record(
             actor="customer", role="customer", action="guest.complaint",
@@ -526,13 +607,81 @@ class GuestService:
             if kind not in EVIDENCE_KINDS:
                 raise GuestError(f"证据类型 {kind} 不支持")
             content = sanitize_user_text(row.get("content"), 300)[0]
-            if not content:
+            url = str(row.get("url") or "")[:300]
+            # 图片证据有 url 即可，content 允许为空（照片本身即内容）
+            if not content and not (kind == "photo" and url):
                 continue
+            if kind == "photo" and url and not url.startswith("/api/"):
+                raise GuestError("图片证据 url 非法")
             out.append(Evidence(id=self._next_evidence, kind=kind,
-                                content=content,
-                                url=str(row.get("url") or "")[:300]))
+                                content=content or "[图片证据]", url=url))
             self._next_evidence += 1
         return out
+
+    # ------------------------------------------------------------ 自动处理
+    def _execute_actions(self, complaint: Complaint, handling: dict[str, Any],
+                         *, item: Any = None) -> list[dict[str, Any]]:
+        """执行客诉里能自动完成的动作，返回对顾客可见的动作清单。
+
+        刻意**不碰审批状态机**：不核实证据、不批准补偿、不改 version，
+        退款终审仍由 manager 按双人复核规则执行。这里推进的是「催厨房 /
+        催办责任人 / 超时升级 / 关联订单快照」这类不需要人做决定的步骤。
+        """
+        actions: list[dict[str, Any]] = []
+
+        # 1) 上菜慢且菜品未结束 → 直接催厨房，走订单域累加 urge_count
+        if (handling["category"] == "上菜慢" and item is not None
+                and not getattr(item, "finished", False)):
+            try:
+                self.state.orders.urge(item.id, actor="guest-ai",
+                                       now=self.state.to_datetime())
+                count = int(getattr(item, "urge_count", 0) or 0)
+                actions.append({
+                    "type": "urge_kitchen", "item_id": item.id,
+                    "urge_count": count,
+                    "detail": f"已向厨房催「{item.dish_name}」（第 {count} 次）",
+                    "reply": f"向厨房催了「{item.dish_name}」"
+                             f"（第 {count} 次，派单优先级已提前）",
+                })
+            except Exception as exc:  # noqa: BLE001 - 菜品刚做完就别让客诉提交失败
+                log.info("客诉自动催菜跳过：%s", exc)
+
+        # 2) 关联订单 → 订单快照落进处理记录，人工核证据时直接可用
+        if handling["order_no"]:
+            actions.append({
+                "type": "evidence_linked", "order_no": handling["order_no"],
+                "detail": f"已关联订单 {handling['order_no']} 的下单快照",
+            })
+
+        # 3) 有人工卡点 → 发起催办，顾客侧不再只是「等通知」
+        owner = handling["blocker_owner"]
+        if owner and owner != "顾客":
+            self.state.emit("complaint", {
+                "op": "nudge", "complaint_no": complaint.complaint_no,
+                "guest_key": complaint.guest_key,
+                "owner": owner, "blocker": handling["blocker"],
+                "message": (f"请{owner}处理工单 {complaint.complaint_no}："
+                            f"{handling['blocker']}"),
+            })
+            actions.append({
+                "type": "nudge_reviewer", "owner": owner,
+                "detail": f"已催办{owner}处理「{handling['blocker']}」",
+                "reply": f"催办{owner}处理「{handling['blocker']}」",
+            })
+
+        # 4) 超时 → 升级优先处理
+        if handling["overdue"]:
+            self.state.emit("complaint", {
+                "op": "escalate", "complaint_no": complaint.complaint_no,
+                "overdue_min": handling["overdue_min"],
+                "message": (f"工单 {complaint.complaint_no} 超时 "
+                            f"{handling['overdue_min']} 分钟，请优先处理"),
+            })
+            actions.append({
+                "type": "escalate_overdue",
+                "detail": f"超时 {handling['overdue_min']} 分钟，已升级",
+            })
+        return actions
 
     # ------------------------------------------------------------ 写：审批
     def _guard_version(self, complaint: Complaint,
@@ -598,10 +747,21 @@ class GuestService:
         return self._view(complaint)
 
     def _order_cap(self, complaint: Complaint) -> float:
-        try:
-            return self.state.orders.order(complaint.order_id).amount
-        except Exception:  # noqa: BLE001 - 订单被清理时按 0 封顶，从严
-            return 0.0
+        """补偿上限 = 提交时落盘的下单价格快照。
+
+        绝不读 `state.orders`：订单只写库、启动不回读，服务一重启运行时订单
+        就是空的。旧实现查不到时兜底 0.0，于是每笔带补偿的工单（无论选哪个
+        方案）都被判「金额超过快照」，管理员完全无法处理。
+
+        快照随工单持久化（见 `order_snapshot_amount`），重启/退菜都不受影响。
+        旧工单缺该字段时 `from_dict` 已用 amount 回填；极端情况下（手工改坏
+        journal）两值都缺失，退回快照字段而非又拿运行时订单赌运气。
+        """
+        cap = float(getattr(complaint, "order_snapshot_amount", 0) or 0)
+        if cap > 0:
+            return cap
+        # 兜底：老数据两值都无，用 amount；仍无则 0（此时确实无从核算）
+        return float(getattr(complaint, "amount", 0) or 0)
 
     def approve(self, complaint_id: int, *, actor: str, role: str,
                 expected_version: int | None = None,
@@ -617,12 +777,12 @@ class GuestService:
         if complaint.state != ComplaintState.EVIDENCE_OK:
             raise InvalidTransition(
                 f"当前 {complaint.state}，必须先由组长核实证据才能终审")
-        if complaint.reviewer and complaint.reviewer == actor:
+        if DUAL_REVIEW and complaint.reviewer and complaint.reviewer == actor:
             raise GuestError("双人复核：核实人与终审人不能是同一人")
         if complaint.verified_count < 1:
-            raise GuestError("至少一条证据需经组长核实")
+            raise GuestError("至少一条证据需经核实")
         if method not in COMPENSATIONS:
-            raise GuestError("补偿方式只能是 redo / waive / coupon")
+            raise GuestError(f"补偿方式只能是 {' / '.join(COMPENSATIONS)}")
         if complaint.wants_refund and complaint.amount > self._order_cap(complaint):
             raise GuestError("补偿金额超过订单快照金额")
 
@@ -649,6 +809,104 @@ class GuestService:
                                        "method": method,
                                        "amount": complaint.amount,
                                        "reviewer": complaint.reviewer})
+        return self._view(complaint)
+
+    def resolve(self, complaint_id: int, *, actor: str, role: str,
+                method: str = "redo", note: str = "",
+                evidence_ids: list[Any] | None = None,
+                expected_version: int | None = None) -> dict[str, Any]:
+        """管理员单人直通：核实证据 + 终审一步完成（无需等组长/另一人）。
+
+        可选 `evidence_ids` 指定核实哪些证据；不传则核实全部已有证据。
+        若无任何证据且工单关联了订单，自动补一条 order_item 快照证据并核实，
+        保证「管理员能直接处理」不会卡在「至少一条证据」的硬校验上。
+        选中补偿方案仍受资金边界约束——生成凭证，不发生实际退款。
+        """
+        if role != "manager":
+            raise GuestError("单人直通处理只有管理人员（manager）可以执行")
+        complaint = self.complaint(complaint_id)
+        self._guard_version(complaint, expected_version)
+        if complaint.terminal:
+            raise InvalidTransition(f"工单已结案（{complaint.state}），不能重复处理")
+        if method not in COMPENSATIONS:
+            raise GuestError(f"补偿方式只能是 {' / '.join(COMPENSATIONS)}")
+        if complaint.wants_refund and complaint.amount > self._order_cap(complaint):
+            raise GuestError("补偿金额超过订单快照金额")
+
+        moment_dt = self.state.to_datetime()
+        moment = moment_dt.isoformat(timespec="seconds")
+        # 1) 选证据：显式指定则只核这些；否则核全部；没有则按订单快照补一条
+        wanted = {int(x) for x in (evidence_ids or [])
+                  if str(x).strip()} if evidence_ids is not None else None
+        matched = 0
+        for row in complaint.evidences:
+            if wanted is None or row.id in wanted:
+                row.verified = True
+                row.verified_by = actor
+                row.verified_at = moment
+                row.note = str(note or "")[:200]
+                matched += 1
+        if matched == 0 and complaint.evidences:
+            raise NotFoundError("所选证据不存在于本工单")
+        if not complaint.evidences and complaint.order_id is not None:
+            order = None
+            try:
+                order = self.state.orders.order(complaint.order_id)
+            except Exception:  # noqa: BLE001 - 重启后运行时订单为空，属预期
+                log.info("单人直通：运行时订单不可读，改用客诉自带快照补证")
+            if order is not None:
+                snapshot = "、".join(
+                    f"{it.dish_name}×{it.qty}" for it in order.items[:5]
+                ) or order.order_no
+                content = f"订单 {order.order_no} 快照：{snapshot}"
+            else:
+                # 用随工单落盘的快照兜底，保证重启后管理员依然能直接处理，
+                # 不因「运行时订单被清空」卡在「没有可核实的证据」上。
+                order_no = str((complaint.ai_suggestion or {}).get("handling", {})
+                               .get("order_no") or "")
+                content = (f"订单 {order_no or '#' + str(complaint.order_id)} "
+                           f"下单快照：¥{complaint.order_snapshot_amount:.2f}"
+                           f"（服务重启后按工单快照恢复）")
+            complaint.evidences.append(Evidence(
+                id=self._next_evidence, kind="order_item",
+                content=content,
+                url="", verified=True, verified_by=actor,
+                verified_at=moment, note="管理员单人直通自动关联",
+            ))
+            self._next_evidence += 1
+            matched = 1
+        if complaint.verified_count < 1:
+            raise GuestError("工单没有可核实的证据，请先补充证据后再处理")
+
+        # 2) 核实落轨迹
+        complaint.reviewer = actor
+        complaint.reviewed_at = moment
+        self._record(complaint, "review_evidence", actor=actor,
+                     detail={"verified": matched, "via": "resolve"})
+        # 3) 终审出凭证
+        complaint.state = ComplaintState.APPROVED
+        complaint.method = method
+        complaint.approver = actor
+        complaint.decided_at = moment
+        complaint.voucher_no = f"V{moment_dt.strftime('%m%d')}-{complaint.id:03d}"
+        complaint.version += 1
+        complaint.updated_at = moment_dt
+        self._record(complaint, "resolve", actor=actor,
+                     detail={"method": method, "note": str(note)[:200],
+                             "voucher_no": complaint.voucher_no,
+                             "mode": "single_step"})
+        self.save_complaint(complaint)
+        self.state.emit("complaint", {
+            "op": "approved", "complaint_no": complaint.complaint_no,
+            "guest_key": complaint.guest_key, "state": complaint.state,
+            "message": (f"管理员已直接处理，凭证 {complaint.voucher_no}"
+                        f"（演示环境不发生实际退款）")})
+        self.state.audit.record(actor=actor, role=role,
+                                action="guest.resolve",
+                                target=complaint.complaint_no,
+                                after={"voucher_no": complaint.voucher_no,
+                                       "method": method, "amount": complaint.amount,
+                                       "verified_count": complaint.verified_count})
         return self._view(complaint)
 
     def reject(self, complaint_id: int, *, actor: str, role: str,
@@ -701,8 +959,7 @@ class GuestService:
         return self._view(complaint)
 
     # ------------------------------------------------------------ 视图
-    @staticmethod
-    def _view(complaint: Complaint) -> dict[str, Any]:
+    def _view(self, complaint: Complaint) -> dict[str, Any]:
         row = complaint.to_dict()
         row["verified_count"] = complaint.verified_count
         row["needs_evidence"] = complaint.state == ComplaintState.SUBMITTED
@@ -711,6 +968,26 @@ class GuestService:
         row["compensation_note"] = (
             "演示环境无支付链路，审批通过仅生成补偿凭证，不发生实际退款"
             if complaint.wants_refund else "本工单不涉及补偿")
+
+        # 处理决策：提交时的快照 + 随时间推进的 SLA 实时刷新（不用重调 AI）
+        handling = dict((complaint.ai_suggestion or {}).get("handling") or {})
+        if handling and handling.get("stage") in (ComplaintState.SUBMITTED,
+                                                   ComplaintState.EVIDENCE_OK):
+            tzinfo = complaint.updated_at.tzinfo if complaint.updated_at else None
+            elapsed = (datetime.now(tzinfo) - complaint.updated_at).total_seconds()
+            handling["overdue"] = elapsed > SLA_SEC
+            handling["overdue_min"] = max(0, int(elapsed // 60) - SLA_SEC // 60)
+            handling["sla_remain_min"] = max(0, int((SLA_SEC - elapsed) // 60))
+            handling["urgent"] = urgent_actions(handling)
+        row["handling"] = handling
+        row["stage"] = handling.get("stage", complaint.state)
+        row["stage_label"] = handling.get("stage_label", "")
+        row["blocker"] = handling.get("blocker", "")
+        row["blocker_owner"] = handling.get("blocker_owner", "")
+        row["overdue"] = bool(handling.get("overdue"))
+        row["actions"] = handling.get("actions") or []
+        row["urgent"] = handling.get("urgent") or []
+        row["ai_reply"] = str((complaint.ai_suggestion or {}).get("reply") or "")
         return row
 
     def complaint_view(self, *, guest_key: str | None = None,

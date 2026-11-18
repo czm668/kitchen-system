@@ -70,9 +70,12 @@ _PERMISSIONS: dict[str, frozenset[str]] = {
     "channel.restore": frozenset({"manager"}),
     "channel.review": frozenset({"lead", "manager"}),
     "staff.write": frozenset({"manager"}),
-    # A11 客诉审批：核实证据=组长/经理；补偿终审=仅经理（且不得与核实人同人）
+    # A11 客诉审批：核实证据=组长/经理；补偿终审=仅经理。
+    # 单人直通（resolve）也仅经理：允许 manager 一人核实+终审，跳过双人复核；
+    # 双人复核是否强制由 guest.service.DUAL_REVIEW 开关控制，默认关闭便于演示。
     "guest.review": frozenset({"lead", "manager"}),
     "guest.approve": frozenset({"manager"}),
+    "guest.resolve": frozenset({"manager"}),
     # A12 经营账：毛利/净利/成本是店内经营数据，只给店长（manager）。
     # 组长、操作员、观察员一律 403——比阈值配置更敏感，宁可收窄。
     "finance.read": frozenset({"manager"}),

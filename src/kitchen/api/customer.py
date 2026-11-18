@@ -44,11 +44,19 @@
 """
 from __future__ import annotations
 
+import hashlib
+import json
+import logging
 import secrets
 import time
+from datetime import datetime
+from pathlib import Path
 from typing import Any
 
 from ..domain import DomainError
+from ..process.journal import append_journal
+
+log = logging.getLogger(__name__)
 
 __all__ = [
     "CustomerError", "CustomerAuthError", "CustomerRateError", "CustomerService",
@@ -76,28 +84,111 @@ class CustomerRateError(CustomerError):
 class CustomerService:
     """顾客会话 + 归属簿 + 催菜限频 + 通知过滤。挂进 `AppState`。"""
 
-    def __init__(self, state) -> None:
+    def __init__(self, state, *, journal_path: Path | None = None) -> None:
         self.state = state
-        # token → set[order_id]（归属簿，内存）
+        self._journal_path = journal_path
+        # 键统一是 token 的 sha256（见 _key）：journal 里只落哈希，绝不落明文
+        # 令牌。第三方读到 var/api/customer_journal.jsonl 也无法反推令牌冒用。
+        # token_digest → set[order_id]（归属簿）
         self._orders: dict[str, set[int]] = {}
-        # token → 会话档案。与归属簿同生命周期（都是纯内存、重启即失效）。
-        # 顾客是匿名的，但后厨需要区分「哪一桌的哪一次开桌」，所以给一个
-        # 脱敏编号；**绝不存姓名/手机号/openid**，也绝不把完整令牌外发。
+        # token_digest → 会话档案。顾客匿名；只留桌号/脱敏编号/guest_key，
+        # **绝不存姓名/手机号/openid**。
         self._profiles: dict[str, dict[str, Any]] = {}
-        # (token, item_id) → 上次催菜墙钟（限频）
+        # (token_digest, item_id) → 上次催菜墙钟（限频）。墙钟跨重启无意义，
+        # 不持久化——重启后限频自然重置，符合预期。
         self._last_urge: dict[tuple[str, int], float] = {}
+        # 启动回放：已开桌令牌的归属/档案跨重启保留，顾客不必重新开桌、
+        # 也不会因为新令牌看不到旧订单。坏行跳过，绝不中断启动。
+        self._applied, self._skipped = self._replay()
+
+    # ------------------------------------------------------------ 持久化
+    @staticmethod
+    def _key(token: Any) -> str:
+        """令牌 → sha256 摘要，作为所有内部字典的键。
+
+        明文令牌只在「开桌响应」里返回给顾客一次，之后服务端内部一律用摘要
+        索引。这样落盘、归属簿、日志里都不出现可直接冒用的凭据。空令牌给
+        固定空串，配合 `_require_token` 的长度校验拒绝。"""
+        text = str(token or "").strip()
+        return hashlib.sha256(text.encode("utf-8")).hexdigest() if text else ""
+
+    def _persist_session(self, key: str) -> bool:
+        """整会话快照按 token 摘要后写覆盖：重放时天然幂等。"""
+        record = {
+            "op": "session", "token_sha256": key,
+            "orders": sorted(self._orders.get(key, ())),
+            "profile": self._profiles.get(key, {}),
+        }
+        ok = append_journal(self._journal_path, record)
+        if not ok and self._journal_path is not None:
+            log.warning("customer journal 写入失败：session（内存态已生效）")
+        return ok
+
+    def _replay(self) -> tuple[int, int]:
+        """回放 customer journal：按 token 摘要后写覆盖，坏行跳过。
+
+        只恢复会话数据，**不重新 bind guest、不碰订单/时钟**——register 的
+        副作用（画像绑定、开桌事件）不能因回放重放，装配顺序上 customer 也
+        排在 guest 之前。订单归属是纯数据，直接补进内存即可。"""
+        if self._journal_path is None or not self._journal_path.exists():
+            return (0, 0)
+        applied = skipped = 0
+        latest: dict[str, dict[str, Any]] = {}
+        try:
+            lines = self._journal_path.read_text(encoding="utf-8").splitlines()
+        except OSError:
+            return (0, 0)
+        for line in lines:
+            if not line.strip():
+                continue
+            try:
+                record = json.loads(line)
+                if record.get("op") != "session":
+                    raise ValueError("未知 op")
+                key = str(record["token_sha256"])
+                if not key or len(key) != 64:
+                    raise ValueError("token_sha256 非法")
+                data = record.get("profile")
+                if not isinstance(data, dict):
+                    raise ValueError("profile 非法")
+                # 后写覆盖：同一令牌最后一次快照为准
+                latest[key] = {"orders": record.get("orders") or [],
+                               "profile": data}
+                applied += 1
+            except (ValueError, KeyError, TypeError):
+                skipped += 1
+        for key, row in latest.items():
+            try:
+                # 只恢复会话档案（令牌有效、桌号、脱敏编号、guest_key）。
+                # **刻意不恢复裸 order_id 归属**：订单本体是纯内存、id 每进程
+                # 从 seed 重新分配，回放旧 order_id 会和新订单撞号，导致
+                # _owner_of 把新单误判给旧会话（催菜 404 / 越权）。订单展示
+                # 依赖订单系统自身的持久化，不在此处制造假归属。
+                self._orders[key] = set()
+                self._profiles[key] = dict(row["profile"])
+            except (ValueError, KeyError, TypeError):
+                skipped += 1
+        return (applied, skipped)
+
+    @property
+    def journal_stats(self) -> dict[str, int]:
+        """回放统计（对齐 guest/finance/compliance 的可观测口径）。"""
+        return {"applied": self._applied, "skipped": self._skipped}
 
     # ------------------------------------------------------------ 会话
     def register(self, table_id: Any = None, guest_key: Any = None,
                  tags: Any = ()) -> dict[str, Any]:
-        """开桌：发令牌 + 脱敏顾客编号。token 只在服务端内存里，重启即失效。
+        """开桌：发令牌 + 脱敏顾客编号。令牌摘要落盘，跨重启仍有效。
 
         `customer_ref` 形如 `T03-A1B2`（桌号 + 令牌前 4 位）或散客 `G-A1B2`。
-        只取 4 位 hex 是刻意的：够在本次服务进程内区分不同开桌，又不能反推
-        完整令牌。它会出现在订单、事件流和审计里，但**不是身份**，服务重启后
-        同一个编号就失去意义。真正需要「谁下的单」必须走会员体系（当前不做）。
+        只取 4 位 hex 是刻意的：够区分不同开桌，又不能反推完整令牌。它会出现
+        在订单、事件流和审计里，但**不是身份**——真正按人识别要会员体系（不做）。
+
+        令牌本身只在开桌响应里明文返回一次；服务端内部（归属簿/档案/journal）
+        一律只留 sha256 摘要，重启后顾客凭原令牌即可恢复会话与订单归属。
         """
         token = secrets.token_hex(16)
+        dkey = self._key(token)
         table = self._coerce_table(table_id)
         suffix = token[:4].upper()
         ref = f"T{table:02d}-{suffix}" if table is not None else f"G-{suffix}"
@@ -106,17 +197,18 @@ class CustomerService:
         # 只在开桌时绑定一次，之后查画像/客诉都必须「令牌 + guest_key」双校验。
         if key:
             self.state.guest.bind(key, tags or ())
-        self._orders[token] = set()
-        self._profiles[token] = {
+        self._orders[dkey] = set()
+        self._profiles[dkey] = {
             "table_id": table, "customer_ref": ref,
             "guest_key": key or None,
         }
+        self._persist_session(dkey)
         return {
             "customer_token": token,
             "customer_ref": ref,
             "table_id": table,
             "guest_key": key or None,
-            "note": "令牌仅本次服务进程有效，重启后请重新开桌",
+            "note": "令牌跨服务重启有效；请妥善保存，丢失后需重新开桌",
             "identity_note": "匿名会话编号，不含姓名/手机号，后厨按此区分本桌订单",
         }
 
@@ -156,10 +248,11 @@ class CustomerService:
                 "table_id": profile.get("table_id")}
 
     def _require_token(self, token: Any) -> str:
-        text = str(token or "").strip()
-        if not text or text not in self._orders:
+        # 返回摘要作为内部键：明文令牌绝不进归属簿/档案/journal。
+        key = self._key(token)
+        if not key or key not in self._orders:
             raise CustomerAuthError("顾客令牌缺失或已失效，请重新开桌")
-        return text
+        return key
 
     # ------------------------------------------------------------ 下单
     def place(self, token: Any, items: list, table_id: Any) -> dict[str, Any]:
@@ -195,6 +288,7 @@ class CustomerService:
             guest_key=profile.get("guest_key"),
         )
         self._orders[key].add(order.id)
+        self._persist_session(key)  # 归属新增订单，整会话快照落盘
         # 和员工下单同一条事件流：管理端看板/TFT 队列屏/顾客通知三端共用，
         # **不在顾客通道另开一套事件**——否则管理端看不到顾客单的状态推进。
         # 带上 customer_ref 后，后厨/审计能追到「哪一桌的哪次开桌」，
@@ -399,14 +493,27 @@ def _menu(state, data: dict[str, Any]) -> dict[str, Any]:
     from .views import dish_view
 
     payload = dish_view(state, {})
+    now = state.to_datetime()
     dishes = []
     for row in payload["dishes"]:
         if not row["enabled"]:
             continue  # 停售菜不上顾客菜单（跟纸菜单一致）
+        # 过期门禁：某菜所有关联批次都过期 → 视同沽清，标出来并说明原因。
+        # 没有批次的新菜、或还有新鲜批次的菜，照常售卖。
+        expired = state.repo.expired_batch_of(row["id"], now)
+        sold_out = bool(row["sold_out"]) or expired is not None
+        reason = ""
+        if expired is not None:
+            stamp = expired.get("expire_at")
+            when = stamp.strftime("%m-%d %H:%M") if isinstance(stamp, datetime) else "—"
+            reason = f"食材批次已过保质期（{when}），已下架"
+        elif row["sold_out"]:
+            reason = "今日已售罄"
         dishes.append({
             "id": row["id"], "code": row["code"], "name": row["name"],
             "category": row["category"], "price": row["price"],
-            "sold_out": row["sold_out"],
+            "sold_out": sold_out,
+            "unavailable_reason": reason,
             "estimate_minutes": row["estimate_minutes"],
         })
     return {"total": len(dishes), "dishes": dishes,

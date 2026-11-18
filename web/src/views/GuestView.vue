@@ -52,6 +52,11 @@ const COMPENSATIONS = [
   { key: 'redo', label: '重做一份' },
   { key: 'waive', label: '本单免单' },
   { key: 'coupon', label: '补偿优惠券' },
+  { key: 'dish_gift', label: '赠送菜品' },
+  { key: 'voucher', label: '代金券' },
+  { key: 'priority', label: '加急重做' },
+  { key: 'apology', label: '致歉说明' },
+  { key: 'points', label: '积分补偿' },
 ]
 
 const shown = computed(() => filter.value === 'all'
@@ -60,8 +65,13 @@ const shown = computed(() => filter.value === 'all'
 const selected = computed(() => complaints.value.find((row) => row.id === selectedId.value) || null)
 const canReview = computed(() => can('guest.review'))
 const canApprove = computed(() => can('guest.approve'))
+const canResolve = computed(() => can('guest.resolve'))
 
 function stateOf(value) { return STATE[value] || { label: value, tone: 'plain' } }
+
+function actionText(handling) {
+  return ((handling && handling.actions) || []).map((a) => a.detail || a.type).join('；')
+}
 
 async function load() {
   loading.value = true
@@ -150,6 +160,15 @@ function approve() {
     `终审通过，凭证已生成（不发生实际退款）`)
 }
 
+function resolve() {
+  const row = selected.value
+  if (!row) return
+  act(`/api/guest/complaints/${row.id}/resolve`,
+    { compensation: compensation.value, expected_version: row.version,
+      note: '管理员单人直通处理' },
+    '已直接处理，凭证已生成（不发生实际退款）')
+}
+
 function reject() {
   const row = selected.value
   if (!row) return
@@ -210,6 +229,10 @@ onMounted(load)
             <div v-if="row.wants_refund" class="tiny muted">
               补偿基数 ¥{{ row.amount }} · 需两级审批
             </div>
+            <div v-if="row.blocker" class="tiny muted">
+              卡点：{{ row.blocker }}
+              <span v-if="row.overdue" class="tag warn">已超时</span>
+            </div>
           </div>
         </div>
       </section>
@@ -232,6 +255,31 @@ onMounted(load)
           </div>
           <p class="text">{{ selected.text }}</p>
 
+          <!-- 处理决策：阶段 / 卡点 / 超时 / 已执行动作（确定性，不代替审批） -->
+          <div v-if="selected.handling && Object.keys(selected.handling).length" class="ai-card">
+            <div class="row between">
+              <span class="label">AI 处理决策</span>
+              <span v-if="selected.handling.overdue" class="tag warn">
+                SLA 超时 {{ selected.handling.overdue_min }} 分
+              </span>
+              <span v-else class="tag plain">SLA 剩 {{ selected.handling.sla_remain_min }} 分</span>
+            </div>
+            <div class="tiny" style="margin-top:6px">
+              当前环节：{{ selected.handling.stage_label || selected.state }}
+            </div>
+            <div class="tiny">
+              卡点：{{ selected.handling.blocker || '无' }}
+              <span v-if="selected.handling.blocker_owner"> · 责任人 {{ selected.handling.blocker_owner }}</span>
+            </div>
+            <div v-if="actionText(selected.handling)" class="tiny muted" style="margin-top:6px">
+              已执行：{{ actionText(selected.handling) }}
+            </div>
+            <div v-if="selected.handling.urgent && selected.handling.urgent.length"
+                 class="tiny danger-text" style="margin-top:6px">
+              待跟进：{{ selected.handling.urgent.join('；') }}
+            </div>
+          </div>
+
           <!-- AI 建议：只读参考 -->
           <div class="ai-card">
             <div class="row between">
@@ -241,6 +289,9 @@ onMounted(load)
               </span>
             </div>
             <div class="tiny">{{ selected.ai_suggestion.summary || '—' }}</div>
+            <div v-if="selected.ai_suggestion.reply" class="tiny" style="margin-top:6px">
+              对客回复：{{ selected.ai_suggestion.reply }}
+            </div>
             <div v-if="selected.ai_suggestion.degraded_reason" class="tiny muted">
               自动降级：{{ selected.ai_suggestion.degraded_reason }}
             </div>
@@ -256,6 +307,10 @@ onMounted(load)
             <input v-if="canReview && selected.needs_evidence" v-model="checked[ev.id]"
                    type="checkbox" />
             <span class="tag plain">{{ ev.kind }}</span>
+            <a v-if="ev.kind === 'photo' && ev.url" :href="ev.url" target="_blank"
+               class="ev-photo" title="查看原图">
+              <img :src="ev.url" alt="证据图片" />
+            </a>
             <span class="tiny grow">{{ ev.content }}</span>
             <span v-if="ev.verified" class="tag ok">已核实 {{ ev.verified_by }}</span>
           </label>
@@ -273,10 +328,19 @@ onMounted(load)
 
           <!-- 动作 -->
           <div class="actions">
+            <!-- 管理员单人直通：选方案后一步核实+终审，无需等组长/另一人 -->
+            <template v-if="canResolve && (selected.needs_evidence || selected.needs_approval)">
+              <select v-model="compensation" class="select sm">
+                <option v-for="c in COMPENSATIONS" :key="c.key" :value="c.key">{{ c.label }}</option>
+              </select>
+              <button class="btn sm primary" :disabled="busy" @click="resolve">
+                单人直通处理
+              </button>
+            </template>
             <template v-if="canReview && selected.needs_evidence">
               <button class="btn sm" :disabled="busy" @click="review">核实勾选的证据</button>
             </template>
-            <template v-if="canApprove && selected.needs_approval">
+            <template v-if="canApprove && selected.needs_approval && !canResolve">
               <select v-model="compensation" class="select sm">
                 <option v-for="c in COMPENSATIONS" :key="c.key" :value="c.key">{{ c.label }}</option>
               </select>
@@ -290,8 +354,13 @@ onMounted(load)
             <input v-model="rejectReason" class="input sm grow" placeholder="驳回原因（必填）" />
             <button class="btn ghost sm" :disabled="busy" @click="reject">确认驳回</button>
           </div>
-          <div v-if="!canApprove && selected.needs_approval" class="tiny muted" style="margin-top: 8px">
-            终审仅管理人员可操作；核实人与终审人不得为同一人。
+          <div v-if="canResolve && (selected.needs_evidence || selected.needs_approval)"
+               class="tiny muted" style="margin-top: 8px">
+            管理员可单人直通：选方案后一步完成核实与终审。需要双人复核时设
+            KITCHEN_DUAL_REVIEW=1 重启服务，即可恢复「核实人≠终审人」流程。
+          </div>
+          <div v-else-if="!canApprove && selected.needs_approval" class="tiny muted" style="margin-top: 8px">
+            终审仅管理人员可操作。
           </div>
 
           <!-- 审批轨迹 -->
@@ -371,6 +440,9 @@ onMounted(load)
 .ai-card { padding: 10px 12px; border-radius: var(--radius-sm);
   background: var(--panel-2); border-left: 3px solid var(--accent); }
 .ev-row { display: flex; align-items: center; gap: 8px; padding: 5px 0; }
+.ev-photo { flex: none; width: 44px; height: 44px; border-radius: 6px; overflow: hidden; border: 1px solid var(--line); }
+.ev-photo img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.btn.primary { background: var(--accent, #0071e3); color: #fff; border-color: var(--accent, #0071e3); }
 .grow { flex: 1; min-width: 0; }
 .kv-row { display: flex; justify-content: space-between; align-items: center;
   margin-top: 10px; padding-top: 8px; border-top: 1px solid var(--line); }
