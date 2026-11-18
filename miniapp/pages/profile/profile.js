@@ -14,12 +14,19 @@ Page({
     tableIndex: 0,
     version: config.VERSION,
     baseUrl: config.BASE_URL,
+    baseUrlOverridden: false,
     probeState: 'idle',       // idle | probing | ok | fail
     probeText: '尚未检测',
     unread: 0
   },
 
   onLoad: function () {
+    var that = this;
+    // 地址自愈 / 手动改地址后立刻同步这页的显示，不用等用户切走再切回
+    if (this._offBaseUrl) { this._offBaseUrl(); }
+    this._offBaseUrl = api.onBaseUrlChanged(function (url) {
+      that.setData({ baseUrl: url, baseUrlOverridden: api.hasBaseUrlOverride() });
+    });
     var labels = config.TABLE_OPTIONS.map(function (n) { return n + ' 号桌'; });
     this.setData({
       tableLabels: labels,
@@ -29,6 +36,10 @@ Page({
     this.probe();
   },
 
+  onUnload: function () {
+    if (this._offBaseUrl) { this._offBaseUrl(); this._offBaseUrl = null; }
+  },
+
   onShow: function () { this.refresh(); },
 
   refresh: function () {
@@ -36,7 +47,9 @@ Page({
     this.setData({
       tokenShort: fmt.tokenShort(api.getToken()),
       customerRef: api.getCustomerRef() || '未开桌',
-      tableIndex: Math.max(0, config.TABLE_OPTIONS.indexOf(table))
+      tableIndex: Math.max(0, config.TABLE_OPTIONS.indexOf(table)),
+      baseUrl: api.getBaseUrl(),
+      baseUrlOverridden: api.hasBaseUrlOverride()
     });
     var that = this;
     api.authed('GET', '/api/customer/notifications', { since: store.getReadSeq() })
@@ -66,7 +79,11 @@ Page({
     }).catch(function (err) {
       that.setData({
         probeState: 'fail',
-        probeText: err.status === 0 ? '连不上服务（检查地址与防火墙）' : (err.message || '连接失败')
+        // status=0 是网络层失败：把实际请求的地址亮出来，一眼能看出
+        // 手机是不是还在打向换 WiFi 前的旧 IP（旧代码包最常见的症状）。
+        probeText: err.status === 0
+          ? '连不上 ' + (err.baseUrl || api.getBaseUrl()) + ' · 可在下方改服务地址'
+          : (err.message || '连接失败')
       });
     });
   },
@@ -110,8 +127,55 @@ Page({
 
   copyBaseUrl: function () {
     wx.setClipboardData({
-      data: config.BASE_URL,
+      data: api.getBaseUrl(),
       success: function () { wx.showToast({ title: '服务地址已复制', icon: 'none' }); }
+    });
+  },
+
+  // 换 WiFi / 电脑 IP 变了时，直接在手机上改地址。覆盖值存 storage，
+  // 所有请求（含溯源二维码）都走 api.getBaseUrl()，立即生效、无需重编译。
+  editBaseUrl: function () {
+    var that = this;
+    wx.showModal({
+      title: '修改服务地址',
+      content: api.getBaseUrl(),
+      editable: true,
+      placeholderText: 'http://192.168.x.x:8848',
+      confirmText: '保存并测试',
+      success: function (res) {
+        if (!res.confirm) { return; }
+        var url = api.normalizeBaseUrl(res.content);
+        if (!url) {
+          wx.showModal({
+            title: '地址格式不对',
+            content: '请填 http://电脑局域网IP:8848，不要带路径或结尾斜杠。',
+            showCancel: false
+          });
+          return;
+        }
+        api.setBaseUrl(url);
+        // 换了后端，旧令牌必然失效，清掉让 authed 自动重开桌
+        api.clearToken();
+        that.setData({ baseUrl: url, baseUrlOverridden: true });
+        wx.showToast({ title: '已保存，正在测试', icon: 'none' });
+        that.probe();
+      }
+    });
+  },
+
+  resetBaseUrl: function () {
+    var that = this;
+    wx.showModal({
+      title: '恢复默认地址',
+      content: '将改回代码包里编译的地址：' + config.BASE_URL,
+      success: function (res) {
+        if (!res.confirm) { return; }
+        api.clearBaseUrl();
+        api.clearToken();
+        that.setData({ baseUrl: config.BASE_URL, baseUrlOverridden: false });
+        that.probe();
+        wx.showToast({ title: '已恢复默认', icon: 'none' });
+      }
     });
   },
 

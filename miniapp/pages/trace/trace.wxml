@@ -10,6 +10,38 @@
     <view class="btn ghost btn--block" style="margin-top: 20rpx;" bindtap="scan">扫一扫餐盘标签</view>
   </view>
 
+  <!-- 空态引导：告诉用户溯源能查到什么，并给一个点了就能看到效果的示例 -->
+  <view wx:if="{{!view && !error && !loading}}" class="card intro-card">
+    <view class="section-title" style="margin-bottom: 8rpx;">扫一扫，看清这盘菜</view>
+    <view class="caption" style="margin-bottom: 24rpx;">每份食材都有唯一溯源码，扫码即可核对三件事：</view>
+    <view class="intro-item">
+      <view class="intro-dot intro-dot--blue">1</view>
+      <view class="grow"><view class="title">来自哪一批</view>
+        <view class="caption">批次号、生产与到期时间</view></view>
+    </view>
+    <view class="intro-item">
+      <view class="intro-dot intro-dot--green">2</view>
+      <view class="grow"><view class="title">谁供应的</view>
+        <view class="caption">供应商、许可证与资质</view></view>
+    </view>
+    <view class="intro-item">
+      <view class="intro-dot intro-dot--orange">3</view>
+      <view class="grow"><view class="title">检测合格吗</view>
+        <view class="caption">检验结果与检验员</view></view>
+    </view>
+    <view class="demo-head" style="margin-top: 28rpx;">试试这些溯源码（全部 24 道菜，点一下即可查询）</view>
+    <view class="demo-list">
+      <view class="demo-item" wx:for="{{demoCodes}}" wx:key="code"
+            bindtap="demoCode" data-code="{{item.code}}">
+        <view class="grow">
+          <view class="title">{{item.code}}</view>
+          <view class="caption">{{item.category}} · {{item.dish}} · {{item.supplier}}</view>
+        </view>
+        <view class="badge {{item.tone}}">{{item.tag}}</view>
+      </view>
+    </view>
+  </view>
+
   <view wx:if="{{history.length}}" class="card">
     <view class="row between">
       <view class="section-title" style="margin: 0;">最近查询</view>
@@ -24,7 +56,7 @@
     </view>
   </view>
 
-  <template wx:if="{{loading}}" is="state-loading" data="{{}}"/>
+  <template wx:if="{{loading}}" is="state-loading" data="{{loading: loading}}"/>
   <view wx:if="{{error}}" class="card">
     <view class="empty-card__title">查询失败</view>
     <view class="empty-card__hint">{{error}}</view>
@@ -57,6 +89,91 @@
       </view>
     </view>
 
+    <!-- 原料溯源：这盘菜用了什么、每样从哪来（溯源主体） -->
+    <view class="card">
+      <view class="row between" style="margin-bottom: 8rpx;">
+        <view class="section-title" style="margin: 0;">原料溯源</view>
+        <view class="badge ok badge--sm">用了 {{view.ingredients.length}} 种原料</view>
+      </view>
+      <view class="caption" style="margin-bottom: 16rpx;">追溯的是原料到货批次，不是成品预制时间</view>
+      <view wx:for="{{view.ingredients}}" wx:key="name" class="ing-item">
+        <view class="row between">
+          <view class="grow">
+            <view class="title">{{item.name}}</view>
+            <view class="caption">{{item.meta}}</view>
+          </view>
+          <view class="badge {{item.tone}} badge--sm">{{item.expired ? '已过期' : (item.batch_no ? '可追溯' : '未登记')}}</view>
+        </view>
+        <view class="caption" style="margin-top: 6rpx;">供应商：{{item.supplier}}</view>
+        <view wx:if="{{item.license}}" class="caption">许可证：{{item.license}}</view>
+        <view class="caption">检疫：{{item.inspectText}}</view>
+      </view>
+      <view wx:if="{{!view.ingredients.length}}" class="caption">这盘菜尚未登记原料来源，无法追溯到具体批次。</view>
+    </view>
+
+    <!-- 现做证据：配方/SOP 是标准，执行记录如实标注 -->
+    <view wx:if="{{view.proof && view.proof.stepCount}}" class="card">
+      <view class="section-title" style="margin-bottom: 12rpx;">现做工序</view>
+      <view class="caption" style="margin-bottom: 16rpx;">
+        {{view.proof.stepCount}} 道工序 · {{view.proof.ccpCount}} 个关键控制点 · {{view.proof.weighCount}} 项称重基准
+      </view>
+      <view wx:for="{{view.proof.steps}}" wx:key="title" class="kv">
+        <text class="kv__k">{{item.title}}</text>
+        <text class="kv__v">{{item.detail}}</text>
+      </view>
+      <view class="caption" style="margin-top: 12rpx;">{{view.proof.note}}</view>
+    </view>
+
+    <!-- 安全核验：三项状态一眼看清 -->
+    <view class="card">
+      <view class="row between" style="margin-bottom: 20rpx;">
+        <view class="section-title" style="margin: 0;">安全核验</view>
+        <view class="badge {{view.expired ? 'danger' : 'ok'}} badge--sm">
+          {{view.expired ? '不建议食用' : '核验通过'}}
+        </view>
+      </view>
+      <view wx:for="{{view.checks}}" wx:key="label" class="check-row">
+        <view class="check-icon check-icon--{{item.tone}}">✓</view>
+        <view class="grow">
+          <view class="title">{{item.label}}</view>
+          <view class="caption">{{item.detail}}</view>
+        </view>
+        <view class="badge {{item.tone}} badge--sm">{{item.state}}</view>
+      </view>
+    </view>
+
+    <!-- 保质期进度条 -->
+    <view wx:if="{{view.shelf.available}}" class="card">
+      <view class="row between" style="margin-bottom: 16rpx;">
+        <view class="section-title" style="margin: 0;">保质期</view>
+        <view class="badge {{view.shelf.tone}} badge--sm">{{view.shelf.hint}}</view>
+      </view>
+      <view class="shelf-track">
+        <view class="shelf-fill {{view.shelf.barTone}}" style="width: {{view.shelf.percent}}%;"></view>
+      </view>
+      <view class="row between" style="margin-top: 12rpx;">
+        <text class="caption">生产 {{view.produce_text}}</text>
+        <text class="caption">到期 {{view.expire_text}}</text>
+      </view>
+    </view>
+
+    <!-- 溯源时间线：生产 → 检测 → 到期 -->
+    <view class="card">
+      <view class="section-title" style="margin-bottom: 24rpx;">溯源时间线</view>
+      <view class="timeline">
+        <view wx:for="{{view.timeline}}" wx:key="title" class="tl-node">
+          <view class="tl-rail">
+            <view class="tl-dot tl-dot--{{item.tone}}"></view>
+            <view wx:if="{{index < view.timeline.length - 1}}" class="tl-line"></view>
+          </view>
+          <view class="tl-body">
+            <view class="title">{{item.title}}</view>
+            <view class="caption">{{item.sub}}</view>
+          </view>
+        </view>
+      </view>
+    </view>
+
     <view class="card">
       <view class="section-title" style="margin-bottom: 12rpx;">供应商与资质</view>
       <view class="kv"><text class="kv__k">供应商</text>
@@ -75,6 +192,10 @@
     </view>
     <view wx:else class="card card--flat">
       <view class="caption">这批菜还没有登记检测记录。溯源链以批次与供应商信息为准。</view>
+    </view>
+
+    <view class="btn ghost btn--block" style="margin-top: 8rpx;" bindtap="backToList">
+      返回 · 查询下一份
     </view>
   </block>
 </view>

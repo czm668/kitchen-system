@@ -1,0 +1,34 @@
+<import src="../../templates/common.wxml"/>
+
+<view class="page chat-page">
+  <view class="chat-tip">
+    你好，我是智能客服。可以直接问我「菜还要多久」「有什么推荐」，
+    也可以描述问题，我会帮你处理；真需要投诉会为你生成工单。
+  </view>
+
+  <scroll-view class="chat-list" scroll-y scroll-into-view="{{scrollTo}}">
+    <view wx:for="{{messages}}" wx:key="id" id="msg-{{item.id}}" class="msg-row {{item.role}}">
+      <view class="bubble {{item.role}}">
+        <view class="bubble-text">{{item.text}}</view>
+        <view wx:if="{{item.kind}}" class="bubble-kind">{{item.kind}}</view>
+        <view wx:if="{{item.ticket}}" class="bubble-ticket">工单 {{item.ticket}}</view>
+      </view>
+    </view>
+    <view wx:if="{{thinking}}" class="msg-row ai">
+      <view class="bubble ai"><view class="bubble-text typing">正在思考…</view></view>
+    </view>
+  </scroll-view>
+
+  <view class="quick-row">
+    <view wx:for="{{quickAsks}}" wx:key="*this" class="quick-chip"
+          bindtap="onQuickAsk" data-text="{{item}}">{{item}}</view>
+  </view>
+
+  <view class="chat-input-bar">
+    <input class="chat-input" placeholder="说说你的问题…" value="{{input}}"
+           maxlength="300" bindinput="onInput" confirm-type="send" bindconfirm="send"/>
+    <view class="send-btn {{sending ? 'disabled' : ''}}" bindtap="send">
+      {{sending ? '…' : '发送'}}
+    </view>
+  </view>
+</view>

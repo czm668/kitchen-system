@@ -6,6 +6,7 @@
     "pages/order-detail/order-detail",
     "pages/trace/trace",
     "pages/notifications/notifications",
+    "pages/chat/chat",
     "pages/service/service",
     "pages/profile/profile"
   ],
@@ -30,5 +31,6 @@
     ]
   },
   "style": "v2",
+  "lazyCodeLoading": "requiredComponents",
   "sitemapLocation": "sitemap.json"
 }

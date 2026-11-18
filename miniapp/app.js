@@ -9,11 +9,12 @@ var config = require('./config.js');
 App({
   globalData: {
     version: config.VERSION,
-    baseUrl: config.BASE_URL,
+    baseUrl: config.BASE_URL,   // onLaunch 会覆盖成实际生效地址（含手机上的自定义值）
     tableId: config.DEFAULT_TABLE
   },
 
   onLaunch: function () {
+    this.globalData.baseUrl = api.getBaseUrl();
     // 桌号首次进来落一次盘，之后「我的」页可改，菜单/确认页共用
     this.globalData.tableId = store.getTable();
     if (!api.getToken()) {

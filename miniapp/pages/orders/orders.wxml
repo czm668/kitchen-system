@@ -14,7 +14,7 @@
   </view>
 
   <template wx:if="{{error}}" is="state-error" data="{{error: error}}"/>
-  <template wx:elif="{{loading}}" is="state-loading" data="{{}}"/>
+  <template wx:elif="{{loading}}" is="state-loading" data="{{loading: loading}}"/>
   <template wx:elif="{{empty}}" is="state-empty"
             data="{{mark: '·', title: '还没有订单', hint: '下单后可以实时看到每道菜的制作进度', actionText: '去点菜'}}"/>
 

@@ -24,7 +24,7 @@
 
   <!-- 三态 -->
   <template wx:if="{{error}}" is="state-error" data="{{error: error}}"/>
-  <template wx:elif="{{loading}}" is="state-loading" data="{{}}"/>
+  <template wx:elif="{{loading}}" is="state-loading" data="{{loading: loading}}"/>
   <template wx:elif="{{visible.length === 0}}" is="state-empty"
             data="{{mark: '·', title: '没有匹配的菜', hint: '换个关键词或分类试试', actionText: '清除筛选'}}"/>
 
@@ -35,7 +35,7 @@
         <view class="grow">
           <view class="row gap-12">
             <text class="title">{{item.name}}</text>
-            <text wx:if="{{item.sold_out}}" class="badge danger badge--sm">已沽清</text>
+            <text wx:if="{{item.sold_out}}" class="badge danger badge--sm">{{item.unavailable_reason || '已沽清'}}</text>
           </view>
           <view class="muted" style="margin-top: 8rpx;">
             {{item.category}} · 参考 {{item.estimate_minutes}} 分钟 · {{item.code}}

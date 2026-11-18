@@ -48,6 +48,7 @@ Page({
           category: d.category || '其他',
           price: d.price, price_text: fmt.money(d.price),
           sold_out: !!d.sold_out, estimate_minutes: d.estimate_minutes || 0,
+          unavailable_reason: d.unavailable_reason || '',
           qty: 0
         };
       });

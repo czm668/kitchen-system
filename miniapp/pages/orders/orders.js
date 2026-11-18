@@ -19,9 +19,25 @@ Page({
 
   onLoad: function () {
     var that = this;
-    this._poll = setInterval(function () { that.reload(); }, config.POLL_INTERVAL_MS);
-    this._notify = setInterval(function () { that.loadNotifications(); },
-                              config.NOTIFY_INTERVAL_MS);
+    // 服务不通时一次请求要等满 8s 超时。若还按 2s/4s 无脑轮询，会同时堆起
+    // 四五个请求，控制台刷一屏 ERR_CONNECTION_TIMED_OUT。所以：
+    //   _busy：上一个请求没回来就跳过本轮，不并发；
+    //   _netFail / _skip：连续网络失败后指数退避（最多跳过 16 轮 = 32s），
+    //   成功一次立刻恢复原间隔。api.js 的地址自愈成功后请求会直接成功，
+    //   因此换 WiFi 的场景根本不会进入退避。
+    this._busy = { orders: false, notify: false };
+    this._netFail = { orders: 0, notify: 0 };
+    this._skip = { orders: 0, notify: 0 };
+    this._poll = setInterval(function () {
+      if (that._busy.orders) { return; }
+      if (that._skip.orders > 0) { that._skip.orders -= 1; return; }
+      that.reload();
+    }, config.POLL_INTERVAL_MS);
+    this._notify = setInterval(function () {
+      if (that._busy.notify) { return; }
+      if (that._skip.notify > 0) { that._skip.notify -= 1; return; }
+      that.loadNotifications();
+    }, config.NOTIFY_INTERVAL_MS);
     this._cd = setInterval(function () { that.tickCd(); }, 1000);
     this.reload();
     this.loadNotifications();
@@ -45,7 +61,11 @@ Page({
 
   reload: function () {
     var that = this;
+    if (this._busy.orders) { return Promise.resolve(false); }
+    this._busy.orders = true;
     return api.authed('GET', '/api/customer/orders').then(function (data) {
+      that._busy.orders = false;
+      that._netFail.orders = 0; that._skip.orders = 0;
       var all = (data.orders || []).map(fmt.decorateOrder);
       var active = [], done = [];
       all.forEach(function (order) {
@@ -58,11 +78,20 @@ Page({
         doneOrders: that.applyUrge(done),
         empty: all.length === 0, loading: false, error: ''
       });
+      return true;
     }).catch(function (err) {
+      that._busy.orders = false;
+      if (err.status === 0) {
+        that._netFail.orders = Math.min(that._netFail.orders + 1, 4);
+        that._skip.orders = Math.min(1 << that._netFail.orders, 16);
+      }
       that.setData({
         loading: false,
-        error: err.status === 0 ? '后厨服务暂不可达，稍后自动重试' : (err.message || '订单加载失败')
+        error: err.status === 0
+          ? '连不上 ' + (err.baseUrl || api.getBaseUrl()) + '，稍后自动重试'
+          : (err.message || '订单加载失败')
       });
+      return false;
     });
   },
 
@@ -93,10 +122,21 @@ Page({
 
   loadNotifications: function () {
     var that = this;
+    if (this._busy.notify) { return; }
+    this._busy.notify = true;
     api.authed('GET', '/api/customer/notifications', { since: store.getReadSeq() })
       .then(function (data) {
+        that._busy.notify = false;
+        that._netFail.notify = 0; that._skip.notify = 0;
         that.setData({ unread: (data.notifications || []).length });
-      }).catch(function () { /* 通知失败不打扰订单主流程 */ });
+      }).catch(function (err) {
+        that._busy.notify = false;
+        if (err.status === 0) {
+          that._netFail.notify = Math.min(that._netFail.notify + 1, 4);
+          that._skip.notify = Math.min(1 << that._netFail.notify, 16);
+        }
+        /* 通知失败不打扰订单主流程，只做退避 */
+      });
   },
 
   urge: function (e) {

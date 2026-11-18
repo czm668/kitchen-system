@@ -36,8 +36,8 @@ sys.path.insert(0, str(ROOT))  # kitchen.storage 复用 tools/migrate.py 需要�
 PAGES = [
     "pages/menu/menu", "pages/cart/cart", "pages/orders/orders",
     "pages/order-detail/order-detail", "pages/trace/trace",
-    "pages/notifications/notifications", "pages/service/service",
-    "pages/profile/profile",
+    "pages/notifications/notifications", "pages/chat/chat",
+    "pages/service/service", "pages/profile/profile",
 ]
 
 #: 微信开发者工具打开工程所需的最小文件集（公共文件 + 页面四件套）
@@ -205,6 +205,13 @@ def _route_signatures() -> set[tuple[str, str]]:
     out: set[tuple[str, str]] = set()
     for route in router.routes:
         out.add((route.method, route.pattern))
+    # server.py 的二进制端点不走 Router（上传/取图/溯源 PNG），但仍属于
+    # 顾客可调用的合法接口，纳入签名以免契约检查误报。
+    out.update({
+        ("POST", "/api/customer/guest/evidence-upload"),
+        ("GET", "/api/customer/guest/evidence-image"),
+        ("GET", "/api/customer/trace/label.png"),
+    })
     return out
 
 
@@ -332,6 +339,35 @@ def _lan_ip() -> str:
         sock.close()
 
 
+def _sync_base_url(base_url: str) -> str:
+    """把本次服务实际监听地址写回 ``miniapp/config.js`` 的 BASE_URL。
+
+    现场反复踩过的坑：config.js 里手写的局域网 IP 在换 WiFi / DHCP 重分配
+    后就过期了，表现是请求超时或打到旧地址，而页面上只看到「网络不可用」。
+    服务是唯一知道自己绑在哪个地址的地方，所以由它在启动自检通过后同步，
+    不再要求人肉 `ipconfig` 改代码。只在值真的变化时才写盘，避免每次启动
+    都触发开发者工具的热重载。
+
+    返回一句可直接打印的中文说明（未改动 / 已改动 / 跳过原因）。
+    """
+    path = ROOT / "miniapp" / "config.js"
+    if not path.is_file():
+        return "config.js 不存在，跳过"
+    text = path.read_text(encoding="utf-8")
+    pattern = re.compile(r"(const\s+BASE_URL\s*=\s*)['\"][^'\"]+['\"](\s*;)")
+    match = pattern.search(text)
+    if not match:
+        return "未找到 BASE_URL 声明，跳过"
+    current = re.search(r"['\"]([^'\"]+)['\"]", match.group(0)).group(1)
+    if current == base_url:
+        return f"已是 {base_url}，无需改动"
+    replacement = match.group(1) + "'" + base_url + "'" + match.group(2)
+    path.write_text(pattern.sub(lambda _: replacement, text, count=1),
+                    encoding="utf-8")
+    return (f"{current} → {base_url}（已写回 config.js，"
+            "请在微信开发者工具重新编译）")
+
+
 def main() -> int:
     report = Report()
     print("A9 顾客端小程序验收自检")
@@ -363,7 +399,8 @@ def main() -> int:
             print("  定时任务（A3）：留样到期扫描 10s/次 + 证件扫描每日 06:00；"
                   "GET /api/admin/scheduler 查看运行统计")
         if lan:
-            print(f"  1) 把 miniapp/config.js 的 BASE_URL 改成 '{base_url}'")
+            print("  1) BASE_URL 会在服务就绪后自动同步到 miniapp/config.js"
+                  "（换 WiFi 后不用再手改 IP）")
             print("  2) 手机与电脑同一 WiFi；基础库 2.4.0+ 的开发版可直接请求"
                   "同网段 http IP，若仍报域名错再打开手机端「调试模式」")
             print("  3) Windows 防火墙放行 TCP 8848 入站（不然手机一直超时）")
@@ -379,6 +416,9 @@ def main() -> int:
             if probe.connect_ex(("127.0.0.1", 8848)) == 0:
                 print("  ⚠️ 8848 已有服务在监听，本次不重复启动。")
                 print("     要确认它是不是本工程 API：python tools/miniapp_netcheck.py")
+                # 换 WiFi 后 IP 会变，但旧服务还占着端口：这里仍要把新 IP
+                # 写回 config.js，否则小程序会一直打向过期的地址。
+                print(f"  🔄 BASE_URL 自动同步：{_sync_base_url(base_url)}")
                 return 1
 
         workdir = ROOT / ".local/tmp/miniapp-serve"
@@ -417,6 +457,10 @@ def main() -> int:
             print("  ❌ 服务已起但请求不通，跑 python tools/miniapp_netcheck.py 定位")
             server.stop()
             return 1
+
+        # 端口通、HTTP 自检也通了，才把地址写回 config.js：避免自检失败
+        # 却把小程序指向一个不可用的地址。
+        print(f"  🔄 BASE_URL 自动同步：{_sync_base_url(base_url)}")
 
         print(f"\n  ✅ 后端已就绪：{base_url}")
         print("     保持此窗口开着，再去微信开发者工具点「编译」。（Ctrl+C 停止）",

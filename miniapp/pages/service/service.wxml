@@ -4,16 +4,20 @@
   <view class="card card--flat">
     <view class="section-title">智能客服 · 即时受理</view>
     <view class="caption" style="margin-top: 12rpx;">
-      提交后由 AI 秒级分类并回复；简单咨询可当场答复结案。涉及退款、异物或身体不适的，
-      一律转「组长核实证据 → 管理人员终审」。
+      想像聊天一样咨询？打开「对话式客服」，可以直接催菜、查订单、问菜单，
+      遇到问题我会当场处理，真需要投诉才为你建工单。
+    </view>
+    <view class="submit-btn ghost" style="margin-top: 16rpx;" bindtap="goChat">
+      打开对话式客服 ›
     </view>
     <view class="caption" style="margin-top: 12rpx;">
+      下方是正式客诉通道：涉及退款、异物或身体不适的，转「核实证据 → 终审」。
       演示环境无支付链路：审批通过只生成补偿凭证，不发生实际退款。
     </view>
   </view>
 
   <template wx:if="{{error}}" is="state-error" data="{{error: error}}"/>
-  <template wx:elif="{{loading}}" is="state-loading" data="{{}}"/>
+  <template wx:elif="{{loading}}" is="state-loading" data="{{loading: loading}}"/>
 
   <block wx:else>
     <view class="section"><view class="section-title">我的用餐画像</view></view>
@@ -46,6 +50,12 @@
       <view class="kv__k">问题描述</view>
       <textarea class="textarea" placeholder="例如：等了很久还没上菜 / 菜里有异物，希望核实"
                 maxlength="500" value="{{text}}" bindinput="onTextInput"/>
+      <view class="kv__k" style="margin-top: 12rpx;">常用语句（点一下填入，可再修改）</view>
+      <view class="tag-row">
+        <view wx:for="{{quickPhrases}}" wx:key="*this"
+              class="tag-pill" bindtap="onQuickPhrase"
+              data-phrase="{{item}}">{{item}}</view>
+      </view>
       <picker mode="selector" range="{{orderLabels}}" value="{{orderIndex}}" bindchange="onOrderChange">
         <view class="list-link">
           <view class="kv__k">关联订单</view>
@@ -72,6 +82,16 @@
       <view class="kv__k" style="margin-top: 16rpx;">证据说明（选填）</view>
       <input class="input" placeholder="例如：已拍照交服务员 / 出餐时间记录"
              maxlength="300" value="{{evidenceText}}" bindinput="onEvidenceInput"/>
+      <view class="kv__k" style="margin-top: 16rpx;">现场照片（选填，最多 5 张）</view>
+      <view class="img-row">
+        <view wx:for="{{evidenceImages}}" wx:key="*this" class="img-thumb">
+          <image src="{{item}}" mode="aspectFill" bindtap="previewImage" data-url="{{item}}"/>
+          <view class="img-remove" bindtap="removeImage" data-index="{{index}}">×</view>
+        </view>
+        <view wx:if="{{evidenceImages.length < 5}}" class="img-add" bindtap="chooseImage">
+          {{uploading ? '上传中…' : '＋ 加照片'}}
+        </view>
+      </view>
       <view class="submit-btn {{submitting ? 'disabled' : ''}}" bindtap="submit">
         {{submitting ? '正在受理…' : '提交给智能客服'}}
       </view>
@@ -88,6 +108,19 @@
         </view>
       </view>
       <view class="caption" style="margin-top: 12rpx;">AI 分类：{{reply.category}} · {{reply.ai_mode === 'live' ? '在线模型' : '离线规则引擎'}}</view>
+      <view wx:if="{{reply.stage_label}}" class="caption" style="margin-top: 8rpx;">
+        当前环节：{{reply.stage_label}}
+        <text wx:if="{{reply.overdue}}" class="badge danger badge--sm" style="margin-left: 8rpx;">已超时</text>
+      </view>
+      <view wx:if="{{reply.blocker}}" class="caption" style="margin-top: 8rpx;">
+        卡点：{{reply.blocker}} · SLA 剩余 {{reply.sla_remain_min}} 分钟
+      </view>
+      <view wx:if="{{reply.action_text}}" class="caption" style="margin-top: 8rpx;">
+        已执行：{{reply.action_text}}
+      </view>
+      <view wx:if="{{reply.urgent_text}}" class="caption" style="margin-top: 8rpx;">
+        待跟进：{{reply.urgent_text}}
+      </view>
       <view class="h3" style="margin-top: 16rpx;">{{reply.ai_reply}}</view>
       <view class="caption" style="margin-top: 12rpx;">{{reply.note}}</view>
     </view>
@@ -107,6 +140,21 @@
         <view class="badge {{item.state_tone}} badge--sm">{{item.state_label}}</view>
       </view>
       <view class="muted" style="margin-top: 10rpx;">{{item.category}} · {{item.text}}</view>
+      <view wx:if="{{item.blocker}}" class="caption" style="margin-top: 8rpx;">
+        环节：{{item.stage_label}} · 卡点：{{item.blocker}}
+        <text wx:if="{{item.overdue}}" class="badge danger badge--sm" style="margin-left: 8rpx;">已超时</text>
+      </view>
+      <view wx:if="{{item.actions_text}}" class="caption" style="margin-top: 8rpx;">
+        已处理：{{item.actions_text}}
+      </view>
+      <view wx:if="{{item.photo_urls.length}}" class="img-row" style="margin-top: 8rpx;">
+        <image wx:for="{{item.photo_urls}}" wx:for-item="purl" wx:key="*this"
+               class="img-thumb" src="{{purl}}" mode="aspectFill" bindtap="previewTicketImage"
+               data-urls="{{item.photo_urls}}" data-url="{{purl}}"/>
+      </view>
+      <view wx:if="{{item.ai_reply}}" class="caption" style="margin-top: 8rpx;">
+        AI 回复：{{item.ai_reply}}
+      </view>
       <view wx:if="{{item.ai_summary}}" class="caption" style="margin-top: 12rpx;">
         AI 建议（{{item.ai_mode_label}}）：{{item.ai_summary}}
       </view>

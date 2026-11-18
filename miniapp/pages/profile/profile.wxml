@@ -52,12 +52,18 @@
       </view>
       <text class="arrow">↻</text>
     </view>
-    <view class="list-link" bindtap="copyBaseUrl">
+    <view class="list-link" bindtap="editBaseUrl">
       <view class="col grow">
-        <view class="kv__v">服务地址</view>
-        <view class="caption" style="margin-top: 6rpx;">{{baseUrl}}（点击复制）</view>
+        <view class="kv__v">服务地址 <text wx:if="{{baseUrlOverridden}}" class="badge plain badge--sm">已自定义</text></view>
+        <view class="caption" style="margin-top: 6rpx;">{{baseUrl}} · 点击修改（换 WiFi 后改这里，不用重编译）</view>
       </view>
-      <text class="arrow">⧉</text>
+      <text class="arrow">›</text>
+    </view>
+    <view class="list-link" bindtap="copyBaseUrl">
+      <view class="kv__k">复制当前地址</view><text class="arrow">⧉</text>
+    </view>
+    <view wx:if="{{baseUrlOverridden}}" class="list-link" bindtap="resetBaseUrl">
+      <view class="kv__k">恢复代码包默认地址</view><text class="arrow">↻</text>
     </view>
     <view class="list-link" bindtap="reopen">
       <view class="kv__k">重新开桌</view><text class="arrow">›</text>

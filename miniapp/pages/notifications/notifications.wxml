@@ -7,7 +7,7 @@
   </view>
 
   <template wx:if="{{error}}" is="state-error" data="{{error: error}}"/>
-  <template wx:elif="{{loading}}" is="state-loading" data="{{}}"/>
+  <template wx:elif="{{loading}}" is="state-loading" data="{{loading: loading}}"/>
   <template wx:elif="{{rows.length === 0}}" is="state-empty"
             data="{{mark: '·', title: '还没有消息', hint: '下单、催菜、出餐后，后厨的动态会出现在这里', actionText: '看看订单'}}"/>
 
