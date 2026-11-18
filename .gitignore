@@ -44,3 +44,7 @@ desktop.ini
 
 # 前端构建临时目录
 web/.esbuild-tmp/
+
+# 本机运行时产物：Ultralytics 自动生成的设置（含本机绝对路径）、旧备份包
+Ultralytics/
+backups/
