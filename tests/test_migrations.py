@@ -213,8 +213,8 @@ def test_all_migrations_execute_without_error(run: migrate.SqliteRun):
     # 015 新增 A11 扩展模块 4 张表（顾客画像/客诉/证据/补偿凭证），
     # 016 新增 A12 经营账本 3 张表（流水/菜品标准成本/期间费用），
     # 017 新增 A13 合规凭证 1 张表（每日检查表快照）
-    assert run.total_tables == 50, (
-        f"应为 13 张底座 + 29 张新表 + 4 张 A11 + 3 张 A12 + 1 张 A13 = 50，实际 {run.total_tables}")
+    assert run.total_tables == 51, (
+        f"应为 13 张底座 + 29 张新表 + 4 张 A11 + 3 张 A12 + 1 张 A13 + 1 张原料批次 = 51，实际 {run.total_tables}")
 
 
 def test_mysql_only_statements_are_limited_to_collation_file():
@@ -231,8 +231,8 @@ def test_every_expected_table_exists(run: migrate.SqliteRun):
 
 
 def test_expected_table_count_matches_design_doc():
-    assert len(migrate.EXPECTED_TABLES) == 29
-    assert len(set(migrate.EXPECTED_TABLES)) == 29, "表名不能重复"
+    assert len(migrate.EXPECTED_TABLES) == 30
+    assert len(set(migrate.EXPECTED_TABLES)) == 30, "表名不能重复"
 
 
 def test_design_doc_table_list_matches_code():
@@ -343,8 +343,8 @@ def test_offline_records_dedupes_by_device_and_seq(db: sqlite3.Connection):
 def test_check_passes():
     result = migrate.check()
     assert result["passed"] is True, "\n".join(result["problems"])
-    assert result["stats"]["files"] == 17
-    assert result["stats"]["tables_total"] == 50
+    assert result["stats"]["files"] == 19
+    assert result["stats"]["tables_total"] == 51
 
 
 def test_check_catches_missing_collation(tmp_path: Path):

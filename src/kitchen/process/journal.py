@@ -35,7 +35,11 @@ from typing import Any
 
 from kitchen.domain import DuplicateError, DomainError, NotFoundError
 
-__all__ = ["append_journal", "replay_journal", "journal_recipe_payload"]
+__all__ = [
+    "append_journal", "replay_journal", "journal_recipe_payload",
+    "journal_supplier_payload", "journal_batch_payload", "journal_trace_payload",
+    "journal_ingredient_batch_payload",
+]
 
 
 def append_journal(path: Path | None, record: dict[str, Any]) -> bool:
@@ -88,6 +92,7 @@ def _apply_dish(repo, payload: dict[str, Any]) -> None:
         name=str(payload.get("name") or ""),
         category=str(payload.get("category") or ""),
         price=float(payload.get("price") or 0.0),
+        prep_minutes=max(0, int(payload.get("prep_minutes") or 0)),
     )
 
 
@@ -134,6 +139,102 @@ def _apply_recipe(repo, payload: dict[str, Any]) -> None:
         )
 
 
+def _apply_supplier(repo, payload: dict[str, Any]) -> None:
+    """重放供应商录入/编辑。id 用日志里的值（编辑要保持原 id，upsert 幂等）。"""
+    sid = int(payload["id"])
+    repo.put_supplier(sid, {
+        "name": str(payload.get("name") or ""),
+        "license_no": str(payload.get("license_no") or "") or None,
+        "contact": str(payload.get("contact") or ""),
+        "qualifications": list(payload.get("qualifications") or []),
+        "state": str(payload.get("state") or "active"),
+    })
+
+
+def _apply_batch(repo, payload: dict[str, Any]) -> None:
+    """重放批次录入/编辑。时间存字符串，put_batch 负责归一化成带时区 datetime。"""
+    bid = int(payload["id"])
+    repo.put_batch(bid, {
+        "batch_no": str(payload.get("batch_no") or ""),
+        "dish_id": int(payload["dish_id"]),
+        "produced_at": payload.get("produced_at"),
+        "expire_at": payload.get("expire_at"),
+        "state": str(payload.get("state") or "produced"),
+    })
+
+
+def _apply_ingredient_batch(repo, payload: dict[str, Any]) -> None:
+    """重放原料批次录入/编辑。id 用日志值，时间字符串由 put 负责归一化。"""
+    bid = int(payload["id"])
+    repo.put_ingredient_batch(bid, {
+        "batch_no": str(payload.get("batch_no") or ""),
+        "ingredient_name": str(payload.get("ingredient_name") or ""),
+        "supplier_id": int(payload.get("supplier_id") or 0),
+        "received_at": payload.get("received_at"),
+        "expire_at": payload.get("expire_at"),
+        "inspection": dict(payload.get("inspection") or {}),
+        "state": str(payload.get("state") or "received"),
+    })
+
+
+def _apply_trace(repo, payload: dict[str, Any]) -> None:
+    """重放溯源码录入/编辑。用 code 作业务键 upsert，重放两遍也幂等。"""
+    code = str(payload["code"])
+    repo.put_trace_code(code, {
+        "id": int(payload.get("id") or 0),
+        "batch_id": payload.get("batch_id"),
+        "supplier_id": payload.get("supplier_id"),
+        "payload": dict(payload.get("payload") or {}),
+        "created_at": payload.get("created_at"),
+    })
+
+
+def journal_supplier_payload(row: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "op": "supplier", "id": int(row["id"]),
+        "name": str(row.get("name") or ""),
+        "license_no": str(row.get("license_no") or ""),
+        "contact": str(row.get("contact") or ""),
+        "qualifications": list(row.get("qualifications") or []),
+        "state": str(row.get("state") or "active"),
+    }
+
+
+def journal_batch_payload(row: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "op": "batch", "id": int(row["id"]),
+        "batch_no": str(row.get("batch_no") or ""),
+        "dish_id": int(row.get("dish_id") or 0),
+        "produced_at": str(row.get("produced_at") or ""),
+        "expire_at": str(row.get("expire_at") or ""),
+        "state": str(row.get("state") or "produced"),
+    }
+
+
+def journal_ingredient_batch_payload(row: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "op": "ingredient_batch", "id": int(row["id"]),
+        "batch_no": str(row.get("batch_no") or ""),
+        "ingredient_name": str(row.get("ingredient_name") or ""),
+        "supplier_id": int(row.get("supplier_id") or 0),
+        "received_at": str(row.get("received_at") or ""),
+        "expire_at": str(row.get("expire_at") or ""),
+        "inspection": dict(row.get("inspection") or {}),
+        "state": str(row.get("state") or "received"),
+    }
+
+
+def journal_trace_payload(row: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "op": "trace", "code": str(row.get("code") or ""),
+        "id": int(row.get("id") or 0),
+        "batch_id": row.get("batch_id"),
+        "supplier_id": row.get("supplier_id"),
+        "payload": dict(row.get("payload") or {}),
+        "created_at": str(row.get("created_at") or ""),
+    }
+
+
 def replay_journal(path: Path | None, repo) -> tuple[int, int]:
     """按序重放配置日志，返回 (成功条数, 跳过条数)。
 
@@ -154,6 +255,14 @@ def replay_journal(path: Path | None, repo) -> tuple[int, int]:
                 _apply_dish(repo, record)
             elif op == "recipe":
                 _apply_recipe(repo, record)
+            elif op == "supplier":
+                _apply_supplier(repo, record)
+            elif op == "batch":
+                _apply_batch(repo, record)
+            elif op == "ingredient_batch":
+                _apply_ingredient_batch(repo, record)
+            elif op == "trace":
+                _apply_trace(repo, record)
             else:
                 skipped += 1
                 continue

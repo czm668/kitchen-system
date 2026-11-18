@@ -35,6 +35,10 @@ import { fmt, fmtInt } from '../utils/format'
 
 const tab = ref('morning')
 const batches = ref([])
+const suppliers = ref([])
+const ingredientBatches = ref([])
+const traceCodes = ref([])
+const dishOptions = ref([])
 const staff = ref([])
 const certs = ref([])
 const morning = ref(null)
@@ -47,6 +51,34 @@ const scanStation = ref('')
 const scanResult = ref(null)
 const scanning = ref(false)
 const stationOptions = ref([])
+
+/** 溯源录入草稿：null = 未展开编辑，对象 = 正在录入/编辑。 */
+const supplierDraft = ref(null)
+const batchDraft = ref(null)
+const ingredientDraft = ref(null)
+const ingredientDraftText = ref('')
+const traceDraft = ref(null)
+const traceDraftText = ref('')
+const savingTrace = ref(false)
+
+const writable = computed(() => can('recipe.write'))
+
+function blankSupplier() {
+  return { id: null, name: '', license_no: '', contact: '',
+           qualifications: [], state: 'active' }
+}
+function blankBatch() {
+  return { id: null, batch_no: '', dish_id: dishOptions.value[0]?.id ?? null,
+           produced_at: '', expire_at: '', state: 'produced' }
+}
+function blankTrace() {
+  return { id: null, code: '', batch_id: null, supplier_id: null }
+}
+function blankIngredient() {
+  return { id: null, batch_no: '', ingredient_name: '',
+           supplier_id: suppliers.value[0]?.id ?? null,
+           received_at: '', expire_at: '', state: 'received' }
+}
 
 const TABS = [
   { key: 'morning', label: '晨检复核' },
@@ -70,14 +102,19 @@ const expiring = computed(() => certs.value.filter((row) => row.warn))
 async function load() {
   loading.value = true
   try {
-    const [batchData, staffData, certData, morningData, stationData] = await Promise.all([
+    const [batchData, staffData, certData, morningData, stationData, dishData] = await Promise.all([
       api.get('/api/batches'),
       api.get('/api/staff'),
       api.get('/api/staff/certificates'),
       api.get('/api/morning'),
       api.get('/api/stations'),
+      api.get('/api/dishes'),
     ])
     batches.value = batchData.batches || []
+    suppliers.value = batchData.suppliers || []
+    ingredientBatches.value = batchData.ingredient_batches || []
+    traceCodes.value = batchData.trace_codes || []
+    dishOptions.value = dishData.dishes || []
     staff.value = staffData.staff || []
     certs.value = certData.certificates || []
     morning.value = morningData
@@ -139,6 +176,142 @@ async function scan() {
   } finally {
     scanning.value = false
   }
+}
+
+function editSupplier(row) {
+  supplierDraft.value = { ...row, qualifications: [...(row.qualifications || [])] }
+  traceDraft.value = null; batchDraft.value = null; ingredientDraft.value = null
+}
+function editBatch(row) {
+  batchDraft.value = { ...row }
+  supplierDraft.value = null; traceDraft.value = null; ingredientDraft.value = null
+}
+function editTrace(row) {
+  traceDraft.value = { ...row }
+  traceDraftText.value = row.payload ? JSON.stringify(row.payload, null, 2) : ''
+  supplierDraft.value = null; batchDraft.value = null; ingredientDraft.value = null
+}
+function editIngredient(row) {
+  ingredientDraft.value = { ...row,
+    received_at: row.received_at || '', expire_at: row.expire_at || '' }
+  ingredientDraftText.value = row.inspection ? JSON.stringify(row.inspection, null, 2) : ''
+  supplierDraft.value = null; batchDraft.value = null; traceDraft.value = null
+}
+
+async function saveSupplier() {
+  const d = supplierDraft.value
+  if (!d) return
+  const quals = Array.isArray(d.qualifications)
+    ? d.qualifications
+    : String(d.qualifications || '').split(/[,，]/).map((s) => s.trim()).filter(Boolean)
+  savingTrace.value = true
+  try {
+    await api.post('/api/trace/suppliers', { ...d, qualifications: quals })
+    toastOk(`供应商「${d.name}」已保存`)
+    supplierDraft.value = null
+    await load()
+  } catch (err) {
+    toastError(err, '保存供应商失败')
+  } finally {
+    savingTrace.value = false
+  }
+}
+
+async function saveBatch() {
+  const d = batchDraft.value
+  if (!d) return
+  savingTrace.value = true
+  try {
+    await api.post('/api/trace/batches', {
+      ...d,
+      dish_id: Number(d.dish_id),
+      produced_at: d.produced_at || null,
+      expire_at: d.expire_at || null,
+    })
+    toastOk(`批次「${d.batch_no}」已保存`)
+    batchDraft.value = null
+    await load()
+  } catch (err) {
+    toastError(err, '保存批次失败')
+  } finally {
+    savingTrace.value = false
+  }
+}
+
+async function saveIngredient() {
+  const d = ingredientDraft.value
+  if (!d) return
+  let inspection = {}
+  const text = ingredientDraftText.value.trim()
+  if (text) {
+    try {
+      inspection = JSON.parse(text)
+      if (!inspection || typeof inspection !== 'object' || Array.isArray(inspection)) {
+        throw new Error('检疫信息必须是 JSON 对象')
+      }
+    } catch (err) {
+      toastWarn(`检疫信息不是合法 JSON：${err.message}`)
+      return
+    }
+  }
+  savingTrace.value = true
+  try {
+    await api.post('/api/trace/ingredient-batches', {
+      ...d,
+      supplier_id: Number(d.supplier_id),
+      received_at: d.received_at || null,
+      expire_at: d.expire_at || null,
+      inspection,
+    })
+    toastOk(`原料批次「${d.batch_no}」已保存`)
+    ingredientDraft.value = null
+    ingredientDraftText.value = ''
+    await load()
+  } catch (err) {
+    toastError(err, '保存原料批次失败')
+  } finally {
+    savingTrace.value = false
+  }
+}
+
+async function saveTrace() {
+  const d = traceDraft.value
+  if (!d) return
+  let payload = {}
+  const text = traceDraftText.value.trim()
+  if (text) {
+    try {
+      payload = JSON.parse(text)
+      if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+        throw new Error('检测信息必须是 JSON 对象')
+      }
+    } catch (err) {
+      toastWarn(`检测信息不是合法 JSON：${err.message}`)
+      return
+    }
+  }
+  savingTrace.value = true
+  try {
+    await api.post('/api/trace/codes', {
+      ...d,
+      batch_id: d.batch_id === '' || d.batch_id == null ? null : Number(d.batch_id),
+      supplier_id: d.supplier_id === '' || d.supplier_id == null ? null : Number(d.supplier_id),
+      payload,
+    })
+    toastOk(`溯源码「${d.code}」已保存`)
+    traceDraft.value = null
+    traceDraftText.value = ''
+    await load()
+  } catch (err) {
+    toastError(err, '保存溯源码失败')
+  } finally {
+    savingTrace.value = false
+  }
+}
+
+function fmtTime(v) {
+  if (!v) return '—'
+  return String(v).replace('T', ' ').slice(0, 16)
 }
 
 onMounted(load)
@@ -329,28 +502,182 @@ onMounted(load)
           </table>
         </template>
 
-        <!-- 批次 -->
+        <!-- 批次与溯源：四类资料的录入/编辑 -->
         <template v-else>
-          <table class="table">
-            <thead>
-              <tr>
-                <th style="width: 80px">批次</th>
-                <th>供应商</th>
-                <th style="width: 110px">到货日期</th>
-                <th>检测 / 备注</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr v-for="row in batches" :key="row.id">
-                <td class="mono small">#{{ row.id }}</td>
-                <td>{{ row.supplier_name || row.supplier_id || '—' }}</td>
-                <td class="mono small">{{ row.received_on || row.created_at || '—' }}</td>
-                <td class="tiny muted pre-wrap">
-                  {{ row.inspection || row.note || JSON.stringify(row).slice(0, 90) }}
-                </td>
-              </tr>
-            </tbody>
-          </table>
+          <div class="trace-hint tiny muted">
+            这里的改动会即时生效并写入配置归档，服务重启后仍在；顾客扫码读的就是这份数据。
+          </div>
+
+          <!-- 原料批次：溯源主体 -->
+          <div class="trace-block">
+            <div class="trace-head">
+              <h3>原料批次 <span class="tiny muted">（溯源主体：这批肉/菜从哪来）</span></h3>
+              <button v-if="writable && !ingredientDraft" class="btn sm" @click="ingredientDraft = blankIngredient(); ingredientDraftText = ''">+ 新增原料批次</button>
+            </div>
+            <table class="table">
+              <thead>
+                <tr>
+                  <th>原料</th><th>到货批次</th><th>供应商</th><th>到货 / 到期</th><th>检疫</th><th v-if="writable" style="width:56px">操作</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="row in ingredientBatches" :key="row.id">
+                  <td class="small">{{ row.ingredient_name }}</td>
+                  <td class="mono small">{{ row.batch_no }}</td>
+                  <td class="small">{{ row.supplier_name || row.supplier_id }}</td>
+                  <td class="mono tiny">{{ row.received_at || '—' }} → {{ row.expire_at || '—' }}</td>
+                  <td class="tiny muted">{{ Object.entries(row.inspection || {}).map(([k, v]) => k + ':' + v).join('、') || '—' }}</td>
+                  <td v-if="writable"><button class="linkbtn" @click="editIngredient(row)">编辑</button></td>
+                </tr>
+                <tr v-if="!ingredientBatches.length"><td colspan="6" class="empty">还没有原料批次</td></tr>
+              </tbody>
+            </table>
+            <div v-if="ingredientDraft" class="form-grid">
+              <label>原料名称 <input v-model="ingredientDraft.ingredient_name" class="input" placeholder="五花肉" /></label>
+              <label>到货批次号 <input v-model="ingredientDraft.batch_no" class="input" placeholder="IB-001" /></label>
+              <label>供应商
+                <select v-model.number="ingredientDraft.supplier_id" class="input">
+                  <option v-for="s in suppliers" :key="s.id" :value="s.id">{{ s.name }}</option>
+                </select>
+              </label>
+              <label>到货时间 <input v-model="ingredientDraft.received_at" class="input" placeholder="2026-11-16 08:00" /></label>
+              <label>到期时间 <input v-model="ingredientDraft.expire_at" class="input" placeholder="2026-11-23 08:00" /></label>
+              <label>检疫信息（JSON）
+                <textarea v-model="ingredientDraftText" class="input" rows="3" placeholder='{"项目":"兽药残留","结果":"合格","报告":"JY-001"}'></textarea>
+              </label>
+              <div class="form-actions">
+                <button class="btn sm primary" :disabled="savingTrace" @click="saveIngredient">保存原料批次</button>
+                <button class="btn sm ghost" @click="ingredientDraft = null; ingredientDraftText = ''">取消</button>
+              </div>
+            </div>
+          </div>
+
+          <!-- 溯源码 -->
+          <div class="trace-block">
+            <div class="trace-head">
+              <h3>溯源码 <span class="tiny muted">（顾客扫码查询的码）</span></h3>
+              <button v-if="writable && !traceDraft" class="btn sm" @click="traceDraft = blankTrace(); traceDraftText = ''">+ 新增溯源码</button>
+            </div>
+            <table class="table">
+              <thead>
+                <tr>
+                  <th>溯源码</th><th>菜品批次</th><th>供应商</th><th>检测信息</th><th v-if="writable" style="width:56px">操作</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="row in traceCodes" :key="row.code">
+                  <td class="mono small">{{ row.code }}</td>
+                  <td class="small">{{ batches.find((b) => b.id === row.batch_id)?.batch_no || row.batch_id || '—' }}</td>
+                  <td class="small">{{ suppliers.find((s) => s.id === row.supplier_id)?.name || row.supplier_id || '—' }}</td>
+                  <td class="tiny muted pre-wrap">{{ Object.entries(row.payload || {}).map(([k, v]) => `${k}:${v}`).join('，') || '—' }}</td>
+                  <td v-if="writable"><button class="linkbtn" @click="editTrace(row)">编辑</button></td>
+                </tr>
+                <tr v-if="!traceCodes.length"><td colspan="5" class="empty">还没有溯源码</td></tr>
+              </tbody>
+            </table>
+            <div v-if="traceDraft" class="trace-form">
+              <div class="form-grid">
+                <label>溯源码 <input v-model="traceDraft.code" class="input" placeholder="TC-DEMO-0005" /></label>
+                <label>关联批次
+                  <select v-model="traceDraft.batch_id" class="select">
+                    <option :value="null">— 不关联 —</option>
+                    <option v-for="b in batches" :key="b.id" :value="b.id">{{ b.batch_no }}</option>
+                  </select>
+                </label>
+                <label>供应商
+                  <select v-model="traceDraft.supplier_id" class="select">
+                    <option :value="null">— 不关联 —</option>
+                    <option v-for="s in suppliers" :key="s.id" :value="s.id">{{ s.name }}</option>
+                  </select>
+                </label>
+                <label class="full">检测信息（JSON 对象，扫码后逐条展示）
+                  <textarea v-model="traceDraftText" class="input" rows="3" placeholder='{"dish":"红烧肉","检测":"合格","检验员":"王组长","报告":"JC-2026-1121"}'></textarea>
+                </label>
+              </div>
+              <div class="form-actions">
+                <button class="btn sm primary" :disabled="savingTrace" @click="saveTrace">保存溯源码</button>
+                <button class="btn sm ghost" @click="traceDraft = null; traceDraftText = ''">取消</button>
+              </div>
+            </div>
+          </div>
+
+          <!-- 批次 -->
+          <div class="trace-block">
+            <div class="trace-head">
+              <h3>食材批次</h3>
+              <button v-if="writable && !batchDraft" class="btn sm" @click="batchDraft = blankBatch()">+ 新增批次</button>
+            </div>
+            <table class="table">
+              <thead>
+                <tr>
+                  <th>批次号</th><th>菜品</th><th>生产时间</th><th>到期时间</th><th v-if="writable" style="width:56px">操作</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="row in batches" :key="row.id">
+                  <td class="mono small">{{ row.batch_no }}</td>
+                  <td class="small">{{ dishOptions.find((d) => d.id === row.dish_id)?.name || row.dish_id }}</td>
+                  <td class="mono small">{{ fmtTime(row.produced_at) }}</td>
+                  <td class="mono small">{{ fmtTime(row.expire_at) }}</td>
+                  <td v-if="writable"><button class="linkbtn" @click="editBatch(row)">编辑</button></td>
+                </tr>
+                <tr v-if="!batches.length"><td colspan="5" class="empty">还没有批次</td></tr>
+              </tbody>
+            </table>
+            <div v-if="batchDraft" class="trace-form">
+              <div class="form-grid">
+                <label>批次号 <input v-model="batchDraft.batch_no" class="input" placeholder="B-DEMO-005" /></label>
+                <label>菜品
+                  <select v-model="batchDraft.dish_id" class="select">
+                    <option v-for="d in dishOptions" :key="d.id" :value="d.id">{{ d.name }}</option>
+                  </select>
+                </label>
+                <label>生产时间 <input v-model="batchDraft.produced_at" class="input" placeholder="2026-11-17 09:00:00" /></label>
+                <label>到期时间 <input v-model="batchDraft.expire_at" class="input" placeholder="2026-11-19 09:00:00" /></label>
+              </div>
+              <div class="form-actions">
+                <button class="btn sm primary" :disabled="savingTrace" @click="saveBatch">保存批次</button>
+                <button class="btn sm ghost" @click="batchDraft = null">取消</button>
+              </div>
+            </div>
+          </div>
+
+          <!-- 供应商 -->
+          <div class="trace-block">
+            <div class="trace-head">
+              <h3>供应商</h3>
+              <button v-if="writable && !supplierDraft" class="btn sm" @click="supplierDraft = blankSupplier()">+ 新增供应商</button>
+            </div>
+            <table class="table">
+              <thead>
+                <tr>
+                  <th>名称</th><th>许可证号</th><th>联系人</th><th>资质</th><th v-if="writable" style="width:56px">操作</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="row in suppliers" :key="row.id">
+                  <td class="small">{{ row.name }}</td>
+                  <td class="mono small">{{ row.license_no || '—' }}</td>
+                  <td class="small">{{ row.contact || '—' }}</td>
+                  <td class="tiny muted">{{ (row.qualifications || []).join('、') || '—' }}</td>
+                  <td v-if="writable"><button class="linkbtn" @click="editSupplier(row)">编辑</button></td>
+                </tr>
+                <tr v-if="!suppliers.length"><td colspan="5" class="empty">还没有供应商</td></tr>
+              </tbody>
+            </table>
+            <div v-if="supplierDraft" class="trace-form">
+              <div class="form-grid">
+                <label>名称 <input v-model="supplierDraft.name" class="input" placeholder="XX食品厂" /></label>
+                <label>许可证号 <input v-model="supplierDraft.license_no" class="input" /></label>
+                <label>联系人 <input v-model="supplierDraft.contact" class="input" /></label>
+                <label class="full">资质（逗号分隔） <input v-model="supplierDraft.qualifications" class="input" placeholder="营业执照,食品生产许可证" /></label>
+              </div>
+              <div class="form-actions">
+                <button class="btn sm primary" :disabled="savingTrace" @click="saveSupplier">保存供应商</button>
+                <button class="btn sm ghost" @click="supplierDraft = null">取消</button>
+              </div>
+            </div>
+          </div>
         </template>
       </div>
     </section>
@@ -406,4 +733,28 @@ onMounted(load)
 .warnrow td { background: var(--warn-soft); }
 
 .select.mini { height: 26px; width: auto; padding: 0 7px; font-size: 11.5px; }
+
+/* 溯源录入 */
+.trace-hint { padding: 6px 0 12px; border-bottom: 1px dashed var(--line); }
+.trace-block { margin-top: 16px; }
+.trace-head {
+  display: flex; align-items: center; justify-content: space-between;
+  margin-bottom: 7px;
+}
+.trace-head h3 { margin: 0; font-size: 13px; font-weight: 600; }
+.linkbtn {
+  border: none; background: none; color: var(--accent); cursor: pointer;
+  font-size: 12px; padding: 2px 4px;
+}
+.linkbtn:hover { text-decoration: underline; }
+.trace-form {
+  margin-top: 8px; padding: 12px; border: 1px solid var(--line);
+  border-radius: var(--radius); background: var(--panel);
+}
+.form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.form-grid label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--text-2); }
+.form-grid label.full { grid-column: 1 / -1; }
+.form-grid .input, .form-grid .select { width: 100%; }
+.form-grid textarea.input { height: auto; resize: vertical; font-family: var(--mono); }
+.form-actions { display: flex; gap: 8px; margin-top: 12px; }
 </style>

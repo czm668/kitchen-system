@@ -43,6 +43,7 @@ import logging
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 from datetime import datetime
+from typing import Any
 
 from kitchen.domain import CST, DomainError, NotFoundError, now_cst
 
@@ -370,6 +371,9 @@ class DisinfectionService:
         self._next_ticket = 1
         self._next_event = 1
         self.ignored = 0
+        #: 业务落库写器（A23）：会话 start 与各状态跃迁点（_emit）快照。
+        #: feed() 每帧都动累计值，逐帧双写太重，台账取「跃迁时刻」的曲线位置。
+        self.recorder: Any = None
 
     # ------------------------------------------------------------ 视图
     def now(self) -> datetime:
@@ -426,6 +430,7 @@ class DisinfectionService:
         session._last_ts = moment
         self._records[record.id] = record
         self._sessions[record.id] = session
+        self._persist_record(record)
         self._emit("started", {
             "session_uid": uid,
             "batch_id": batch_id,
@@ -593,4 +598,15 @@ class DisinfectionService:
         )
         self._next_event += 1
         self._events.append(event)
+        self._persist_record(record)
         return event
+
+    # ------------------------------------------------------------ 落库旁路（A23）
+    def _persist_record(self, record: DisinfectionRecord) -> None:
+        """消毒会话快照（唯一键 session_uid，uk_dis_session）。失败只计数。"""
+        if self.recorder is None:
+            return
+        try:
+            self.recorder.upsert_disinfection_record(record)
+        except Exception:  # pragma: no cover - 双保险
+            log.warning("消毒会话落库异常（%s）", record.session_uid, exc_info=True)

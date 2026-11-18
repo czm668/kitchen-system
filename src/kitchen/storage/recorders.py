@@ -24,6 +24,7 @@ from pathlib import Path
 from typing import Any, Mapping
 
 from .backend import open_runtime
+from .business import BusinessRecorderMixin
 
 log = logging.getLogger("kitchen.storage.recorders")
 
@@ -57,11 +58,14 @@ def _clip(value: Any, limit: int) -> str | None:
     return text[:limit]
 
 
-class SqliteRecorder:
+class SqliteRecorder(BusinessRecorderMixin):
     """运行时库写入器（类名保留兼容，实际支持 SQLite / MySQL）。`close()` 幂等。
 
     `target` 为文件路径时用 SQLite（默认，A1 行为不变）；为
     `mysql://user:pass@host:port/db` 时走 MySQL（A18）。
+    A23 起混入 `BusinessRecorderMixin`：业务写路径（订单/人员/过程留痕/审计）
+    共用同一连接、同一把锁与同一失败计数——两个锁保护一个连接会出现
+    「遥测线程与订单线程同时抢 sqlite 连接」的竞态，必须收敛到一处。
     """
 
     def __init__(self, target: str | Path, *, device_id: str = "kitchen-node-01",
@@ -79,6 +83,8 @@ class SqliteRecorder:
         self.write_failures = 0
         self.frames_written = 0
         self.events_written = 0
+        #: 业务写路径成功次数（A23：订单/人员/过程留痕/审计/基线物化）
+        self.business_writes = 0
 
     # ------------------------------------------------------------ 遥测帧
     def record_frame(self, metrics: Mapping[str, Any], ts: datetime) -> int:
@@ -150,8 +156,26 @@ class SqliteRecorder:
             "tables": tables,
             "frames_written": self.frames_written,
             "events_written": self.events_written,
+            "business_writes": self.business_writes,
             "write_failures": self.write_failures,
         }
+
+    def order_id_bounds(self) -> tuple[int, int]:
+        """运行时库里 `orders` / `order_items` 的当前最大主键（取不到返回 0,0）。
+
+        启动时用它对齐内存里的自增游标。订单只存在于内存、库是写穿镜像，
+        重启后游标从 1 重新开始，会覆盖上次运行留下的行——所以必须先读库。
+        库还没建表（首次启动、迁移未跑完）时按 (0, 0) 处理，不影响启动。
+        """
+        def _max(table: str) -> int:
+            rows = self.conn.query(f"SELECT COALESCE(MAX(id), 0) FROM {table}", [])
+            return int(rows[0][0] or 0) if rows else 0
+
+        try:
+            with self._lock:
+                return _max("orders"), _max("order_items")
+        except Exception:  # noqa: BLE001 - 读不到只是少对齐一次，不该阻断启动
+            return (0, 0)
 
     def readings_history(
         self,

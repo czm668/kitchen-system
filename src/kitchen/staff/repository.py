@@ -30,6 +30,7 @@ RC522 读 NTAG213 拿到的是十六进制串，大小写取决于固件实现�
 from __future__ import annotations
 
 import json
+import logging
 from collections.abc import Iterable, Mapping, Sequence
 from datetime import date, datetime
 from pathlib import Path
@@ -48,6 +49,8 @@ from .models import (
     parse_date,
     parse_qualifications,
 )
+
+log = logging.getLogger("kitchen.staff.repository")
 
 __all__ = [
     "StaffDomainError", "NotFoundError", "DuplicateError", "ForeignKeyError",
@@ -120,6 +123,10 @@ class MemoryStaffRepository:
         self._stations: dict[int, dict[str, Any]] = {}
         #: 工位 → 资质要求的显式覆盖（默认取 `work_stations.kind`）
         self.station_requirements: dict[int, str] = {}
+        #: 业务落库写器（A23）。由 `api/state.py` 装配后注入；None = 纯内存
+        #: （既有默认，全部单测零影响）。种子装载期不触发，基线由
+        #: `sync_baseline()` 一次性物化。
+        self.recorder: Any = None
         #: 自增 id 游标，模仿 AUTO_INCREMENT
         self._seq = {"staff": 0, "card": 0, "cert": 0, "shift": 0}
         if seed_path is not None:
@@ -233,6 +240,10 @@ class MemoryStaffRepository:
             if shift.staff_id == int(staff_id) and shift.shift_date == day
         )
 
+    def all_shifts(self) -> tuple[Shift, ...]:
+        """全部班次（按 id）。基线落库（A23）用，按 (人, 日) 过滤取不全。"""
+        return tuple(sorted(self._shifts, key=lambda shift: shift.id))
+
     def shift_on(self, staff_id: int, station_id: int | None, day: date) -> Shift | None:
         for shift in self.shifts(staff_id, day):
             if station_id is None or shift.station_id == int(station_id):
@@ -292,6 +303,8 @@ class MemoryStaffRepository:
         self._codes[code] = new_id
         if _loading:
             self._seq["staff"] = max(self._seq["staff"], new_id)
+        else:
+            self._persist("staff", "upsert_staff_row", entity)
         return entity
 
     def set_staff_enabled(self, staff_id: int, enabled: bool) -> Staff:
@@ -304,6 +317,7 @@ class MemoryStaffRepository:
             staff.qualifications, bool(enabled),
         )
         self._staff[updated.id] = updated
+        self._persist("staff", "upsert_staff_row", updated)
         return updated
 
     def bind_card(
@@ -323,6 +337,7 @@ class MemoryStaffRepository:
             enabled=bool(enabled), bound_at=now,
         )
         self._cards[uid] = card
+        self._persist("staff_cards", "upsert_card_row", card)
         return card
 
     def set_card_enabled(self, card_uid: str, enabled: bool) -> StaffCard:
@@ -332,6 +347,7 @@ class MemoryStaffRepository:
             raise NotFoundError(f"卡号 {uid} 不存在")
         updated = StaffCard(card.id, card.card_uid, card.staff_id, bool(enabled), card.bound_at)
         self._cards[uid] = updated
+        self._persist("staff_cards", "upsert_card_row", updated)
         return updated
 
     def rebind_card(
@@ -371,6 +387,8 @@ class MemoryStaffRepository:
         self._certificates.setdefault(int(staff_id), []).append(cert)
         if _loading and _cert_id is not None:
             self._seq["cert"] = max(self._seq["cert"], int(_cert_id))
+        else:
+            self._persist("health_certificates", "upsert_certificate_row", cert)
         return cert
 
     def add_shift(
@@ -403,6 +421,8 @@ class MemoryStaffRepository:
         self._shifts.append(shift)
         if _loading and _shift_id is not None:
             self._seq["shift"] = max(self._seq["shift"], int(_shift_id))
+        else:
+            self._persist("shifts", "upsert_shift_row", shift)
         return shift
 
     def block_shift(self, shift_id: int, *, reason: str = "") -> Shift:
@@ -417,6 +437,7 @@ class MemoryStaffRepository:
                     shift.shift_no, "blocked", assignment,
                 )
                 self._shifts[index] = updated
+                self._persist("shifts", "upsert_shift_row", updated)
                 return updated
         raise NotFoundError(f"shift_id={shift_id} 不存在")
 
@@ -430,6 +451,7 @@ class MemoryStaffRepository:
                     cert.valid_to, str(state),
                 )
                 items[index] = updated
+                self._persist("health_certificates", "upsert_certificate_row", updated)
                 return updated
         raise NotFoundError(f"staff_id={staff_id} 下没有 cert_id={cert_id}")
 
@@ -438,6 +460,7 @@ class MemoryStaffRepository:
         if check.staff_id not in self._staff:
             raise ForeignKeyError(f"staff_id={check.staff_id} 不存在，不能写晨检")
         self._checks[(int(check.staff_id), check.check_date)] = check
+        self._persist("morning_checks", "upsert_morning_check_row", check)
         return check
 
     def insert_morning_check(self, check: MorningCheck) -> MorningCheck:
@@ -508,6 +531,18 @@ class MemoryStaffRepository:
         }
 
     # ------------------------------------------------------------ 内部
+    def _persist(self, what: str, method: Any, entity: Any) -> None:
+        """落库旁路：写器未装配或写失败都不影响内存主路径（口径同 A1：
+        落库是锦上添花，失败只计数）。`method` 为方法名字符串或已绑定
+        参数的 lambda，避免 `recorder=None` 时提前求值炸出 AttributeError。"""
+        if self.recorder is None:
+            return
+        try:
+            fn = getattr(self.recorder, method) if isinstance(method, str) else method
+            fn(entity)
+        except Exception:  # pragma: no cover - 写器自身已吞错，这里是双保险
+            log.warning("人员域落库失败（%s）", what, exc_info=True)
+
     def _load_card(self, card: StaffCard) -> None:
         if card.staff_id not in self._staff:
             raise ForeignKeyError(f"卡 {card.card_uid} 指向不存在的 staff_id={card.staff_id}")

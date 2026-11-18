@@ -72,6 +72,12 @@ class TraceView:
     qualifications: str | None
     inspection: dict[str, object]
     qr_url: str
+    # 原料溯源：一盘菜的配方 → 每种原料的到货批次/供应商/检疫。
+    # 成品批次（上面 batch_no 等）只留作出餐/留样追溯，不再是溯源主体。
+    dish_id: int | None = None
+    ingredients: tuple[dict[str, object], ...] = ()
+    recipe: dict[str, object] | None = None
+    proof: dict[str, object] | None = None
 
     @property
     def expired(self) -> bool:
@@ -97,6 +103,10 @@ class TraceView:
             "inspection": self.inspection,
             "expired": self.expired,
             "qr_url": self.qr_url,
+            "dish_id": self.dish_id,
+            "ingredients": [dict(row) for row in self.ingredients],
+            "recipe": dict(self.recipe) if self.recipe else None,
+            "proof": dict(self.proof) if self.proof else None,
         }
 
 
@@ -144,6 +154,24 @@ class TraceService:
             license_no = str(info.get("license_no") or "") or None
             qualifications = info.get("qualifications")
         payload = row.get("payload")
+        # 溯源主体：按配方把这道菜拆成原料，每种原料查到货批次/供应商/检疫。
+        # 成品批次（batch_no 等）保留只作出餐与留样追溯，回答不了「肉哪来的」。
+        # dish_id 优先取溯源码自带字段（新种子直接标菜），没有再回退到成品批次反查。
+        dish_id_value = None
+        raw_dish = row.get("dish_id")
+        if raw_dish not in (None, ""):
+            try:
+                dish_id_value = int(raw_dish) or None
+            except (ValueError, TypeError):
+                dish_id_value = None
+        if dish_id_value is None and batch_id is not None:
+            try:
+                dish_id_value = int(self.repo.batch(int(batch_id)).get("dish_id") or 0) or None
+            except (NotFoundError, ValueError, TypeError):
+                dish_id_value = None
+        ingredients, recipe_meta, proof = self._ingredient_trace(
+            dish_id_value, declared=list(payload.get("ingredients") or [])
+            if isinstance(payload, dict) else [])
         return TraceView(
             code=code_key,
             batch_no=batch_no,
@@ -155,7 +183,109 @@ class TraceService:
             qualifications=str(qualifications) if qualifications else None,
             inspection=dict(payload) if isinstance(payload, dict) else {},
             qr_url=self.label_url(code_key),
+            dish_id=dish_id_value,
+            ingredients=ingredients,
+            recipe=recipe_meta,
+            proof=proof,
         )
+
+    def _ingredient_trace(
+        self, dish_id: int | None, *, declared: list[dict[str, object]]
+    ) -> tuple[tuple[dict[str, object], ...], dict[str, object] | None,
+               dict[str, object] | None]:
+        """沿「菜品 → 原料声明/配方 → 原料批次 → 供应商」组装一屏。
+
+        原料来源有两条声明路径，都不碰出餐门禁（不给无配方菜硬塞配方，否则
+        CookingSession 会强制称重把它卡死）：
+        - `declared`：溯源码 payload 里的 `ingredients`，适合还在补配方的菜；
+        - 配方 `recipe_items`：已经规范化的菜，顺便带出 SOP/称重口径。
+
+        三种事实分开、不互相冒充：配方/SOP 是**标准**，原料批次/检疫是**到货
+        事实**，称重/留样是否发生是**执行记录**——查不到就标「未记录」，绝不
+        把标准写成「已执行」，那是伪造合格证。
+        """
+        if dish_id is None and not declared:
+            return (), None, None
+        try:
+            recipe = self.repo.recipe_for(dish_id) if dish_id is not None else None
+        except NotFoundError:
+            recipe = None
+
+        # 原料清单：payload 声明优先（覆盖全品类），配方项作为标准补充
+        raw_items: list[tuple[str, float | None, float | None]] = []
+        for entry in declared:
+            name = str(entry.get("name") or "").strip()
+            if not name:
+                continue
+            weight = entry.get("weight_g")
+            raw_items.append((name, float(weight) if weight is not None else None,
+                              float(entry.get("tolerance_pct") or 5)))
+        if recipe is not None:
+            for row in self.repo.recipe_items(recipe.id):
+                if not any(name == row.ingredient for name, _, _ in raw_items):
+                    raw_items.append((row.ingredient, row.weight_g, row.tolerance_pct))
+
+        now = datetime.now(CST)
+        ingredients: list[dict[str, object]] = []
+        for name, weight, tolerance in raw_items:
+            batches = self.repo.ingredient_batches_of(name)
+            latest = batches[0] if batches else None
+            ing_supplier = license_no = None
+            if latest is not None:
+                try:
+                    sup = self.repo.supplier(int(latest.get("supplier_id") or 0))
+                    ing_supplier = str(sup.get("name") or "") or None
+                    license_no = str(sup.get("license_no") or "") or None
+                except (NotFoundError, ValueError, TypeError):
+                    pass
+            inspection = dict(latest.get("inspection") or {}) if latest else {}
+            received = latest.get("received_at") if latest else None
+            expire = latest.get("expire_at") if latest else None
+            ingredients.append({
+                "name": name,
+                "weight_g": weight,
+                "tolerance_pct": tolerance,
+                "batch_no": str(latest.get("batch_no") or "") if latest else None,
+                "supplier": ing_supplier,
+                "license_no": license_no,
+                "received_at": received.isoformat() if isinstance(received, datetime) else None,
+                "expire_at": expire.isoformat() if isinstance(expire, datetime) else None,
+                "expired": bool(isinstance(expire, datetime) and expire < now),
+                "inspection": inspection,
+                "note": "未登记原料批次" if latest is None else None,
+            })
+
+        steps = self.repo.sop_steps(recipe.id) if recipe is not None else ()
+        recipe_meta: dict[str, object] | None = None
+        if recipe is not None:
+            recipe_meta = {
+                "id": recipe.id, "version": recipe.version, "name": recipe.name,
+                "item_count": len(self.repo.recipe_items(recipe.id)),
+                "step_count": len(steps),
+            }
+        proof: dict[str, object] = {
+            "sop_steps": [
+                {"step_no": s.step_no, "title": s.title, "ccp": s.ccp,
+                 "heat_level": s.heat_level, "duration_sec": s.duration_sec,
+                 "requires_card": s.requires_card}
+                for s in steps
+            ],
+            "ccp_count": sum(1 for s in steps if s.ccp),
+            "weigh_items": [
+                {"name": i.ingredient, "target_g": i.weight_g,
+                 "tolerance_pct": i.tolerance_pct}
+                for i in (self.repo.recipe_items(recipe.id) if recipe is not None else ())
+            ],
+            # 下面三项是「标准/要求」，不是已完成的事实；执行记录从订单侧查，
+            # 演示环境无对应订单时如实标未记录。
+            "weigh_executed": False,
+            "retention_required_g": 125,
+            "retention_executed": False,
+            "note": ("配方与工序为厨房标准；实际称重/留样需按订单执行记录核验"
+                     if recipe is not None else
+                     "这道菜尚未登记标准配方，仅能追溯到原料到货；称重/留样执行记录未登记"),
+        }
+        return tuple(ingredients), recipe_meta, proof
 
     def batches_of(self, dish_id: int) -> tuple[dict[str, object], ...]:
         """某道菜的所有批次（按生产时间倒序）——出库/召回时按菜反查。"""
@@ -214,5 +344,6 @@ class TraceService:
         return {
             "suppliers": len(self.repo.suppliers()),
             "batches": len(self.repo.batch_ids()),
+            "ingredient_batches": len(self.repo.ingredient_batch_ids()),
             "trace_codes": len(self.repo.trace_rows()),
         }

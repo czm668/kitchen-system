@@ -41,14 +41,18 @@ def test_追加与重放_新建菜品(repo, tmp_path):
 
 
 def test_重放id现算_不与seed撞车(repo, tmp_path):
-    """seed 已占 id 1-4，重放的新菜必须拿 max+1=5，而不是沿用保存时的 id。"""
+    """重放的新菜 id 必须取当前 seed 的 max+1，而不是沿用保存时的 id。
+
+    seed 菜品会扩充，这里按实际最大 id 现算，写死 5 会在加菜后误报。
+    """
+    next_id = max(d.id for d in repo.dishes()) + 1
     path = tmp_path / "config_journal.jsonl"
     append_journal(path, {
         "op": "dish", "code": "D-NEW2", "name": "新菜二号",
         "category": "凉菜", "price": 12.0,
     })
     replay_journal(path, repo)
-    assert repo.dish_by_code("D-NEW2").id == 5
+    assert repo.dish_by_code("D-NEW2").id == next_id
 
 
 def test_配方版本重放_完整复刻(repo, tmp_path):
@@ -71,7 +75,7 @@ def test_配方版本重放_完整复刻(repo, tmp_path):
     steps = list(repo.sop_steps(recipe.id))
     assert items[0].ingredient == "时蔬" and items[0].bounds() == (190.0, 210.0)
     assert steps[0].ccp and steps[0].requires_card
-    assert repo.estimate_minutes(3) != 15  # 有了 SOP，不再取保守值
+    assert repo.estimate_minutes(3) == 8  # 清炒时蔬按难度标定 8 分钟，不走保守值
 
 
 def test_重复重放_撞唯一键整行跳过(repo, tmp_path):

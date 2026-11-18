@@ -22,12 +22,14 @@
 from __future__ import annotations
 
 import json
+import logging
 from collections.abc import Iterable
-from datetime import date
+from datetime import date, datetime
 from pathlib import Path
 from typing import Any
 
 from kitchen.domain import (
+    CST,
     DomainError,
     DuplicateError,
     ForeignKeyError,
@@ -40,6 +42,8 @@ from kitchen.sqlseed import read_table
 from .models import Dish, Recipe, RecipeItem, SopStep, WorkStation, estimate_minutes
 
 __all__ = ["ProcessDomainError", "MemoryProcessRepository", "DEFAULT_SEED"]
+
+log = logging.getLogger("kitchen.process.repository")
 
 #: 工程根的种子文件（`src/kitchen/process/repository.py` → parents[3] = 工程根）
 DEFAULT_SEED = Path(__file__).resolve().parents[3] / "fixtures" / "seed_kitchen.sql"
@@ -90,7 +94,12 @@ class MemoryProcessRepository:
         self._sop: dict[int, list[SopStep]] = {}
         self._suppliers: dict[int, dict[str, Any]] = {}
         self._batches: dict[int, dict[str, Any]] = {}
+        #: 原料批次：ingredient_name ↔ RecipeItem.ingredient 同名关联。
+        self._ingredient_batches: dict[int, dict[str, Any]] = {}
         self._trace: dict[str, dict[str, Any]] = {}
+        #: 业务落库写器（A23）。由 `api/state.py` 装配后注入；None = 纯内存。
+        #: 种子装载发生在装配之前，天然不触发——基线由 `sync_baseline()` 一次性物化。
+        self.recorder: Any = None
 
     # ------------------------------------------------------------ 装载
     @classmethod
@@ -112,6 +121,7 @@ class MemoryProcessRepository:
                 price=_float(row.get("price")),
                 sold_out=as_bool(row.get("sold_out"), False),
                 enabled=as_bool(row.get("enabled"), True),
+                prep_minutes=_int(row.get("prep_minutes")),
             )
         for row in read_table(seed, "work_stations", today=anchor):
             repo.add_station(
@@ -148,21 +158,26 @@ class MemoryProcessRepository:
             repo.add_supplier(_int(row["id"]), dict(row))
         for row in read_table(seed, "dish_batches", today=anchor):
             repo.add_batch(_int(row["id"]), dict(row))
+        for row in read_table(seed, "ingredient_batches", today=anchor):
+            repo.add_ingredient_batch(_int(row["id"]), dict(row))
         for row in read_table(seed, "trace_codes", today=anchor):
             repo.add_trace_code(str(row["code"]), dict(row))
         return repo
 
     # ------------------------------------------------------------ 菜品
     def add_dish(self, *, dish_id: int, code: str, name: str, category: str = "",
-                 price: float = 0.0, sold_out: bool = False, enabled: bool = True) -> Dish:
+                 price: float = 0.0, sold_out: bool = False, enabled: bool = True,
+                 prep_minutes: int = 0) -> Dish:
         if dish_id in self._dishes:
             raise DuplicateError(f"dish_id {dish_id} 已存在（uk_dishes_code/PK）")
         key = code.strip().upper()
         if key in self._dish_by_code:
             raise DuplicateError(f"菜品编码 {code} 重复（uk_dishes_code）")
-        dish = Dish(dish_id, code.strip(), name, category, price, sold_out, enabled)
+        dish = Dish(dish_id, code.strip(), name, category, price, sold_out, enabled,
+                    prep_minutes)
         self._dishes[dish_id] = dish
         self._dish_by_code[key] = dish_id
+        self._persist("dishes", "insert_dish_row", dish)
         return dish
 
     def dish(self, dish_id: int) -> Dish:
@@ -188,8 +203,11 @@ class MemoryProcessRepository:
         """
         dish = self.dish(dish_id)
         updated = Dish(dish.id, dish.code, dish.name, dish.category, dish.price,
-                       bool(sold_out), dish.enabled)
+                       bool(sold_out), dish.enabled, dish.prep_minutes)
         self._dishes[dish.id] = updated
+        # 沽清是对既有行的字段更新：INSERT IGNORE 不会生效，走定向 UPDATE
+        self._persist("dishes", lambda r: self.recorder.update_dish_sold_out(
+            r.id, r.sold_out), updated)
         return updated
 
     # ------------------------------------------------------------ 工位
@@ -204,6 +222,7 @@ class MemoryProcessRepository:
                               device_id, "idle", capacity)
         self._stations[station_id] = station
         self._station_by_code[key] = station_id
+        self._persist("work_stations", "insert_station_row", station)
         return station
 
     def station(self, station_id: int) -> WorkStation:
@@ -238,6 +257,7 @@ class MemoryProcessRepository:
                 )
         recipe = Recipe(recipe_id, dish_id, version, name, enabled)
         self._recipes[recipe_id] = recipe
+        self._persist("dish_recipes", "insert_recipe_row", recipe)
         return recipe
 
     def add_recipe_item(self, *, item_id: int, recipe_id: int, ingredient: str,
@@ -255,6 +275,7 @@ class MemoryProcessRepository:
                           float(tolerance_pct), int(sort_no))
         self._recipe_items.setdefault(recipe_id, []).append(item)
         self._recipe_items[recipe_id].sort(key=lambda row: (row.sort_no, row.id))
+        self._persist("dish_recipe_items", "insert_recipe_item_row", item)
         return item
 
     def add_sop_step(self, *, step_id: int, recipe_id: int, step_no: int, title: str,
@@ -271,6 +292,7 @@ class MemoryProcessRepository:
                        heat_level, int(duration_sec), bool(ccp), bool(requires_card))
         self._sop.setdefault(recipe_id, []).append(step)
         self._sop[recipe_id].sort(key=lambda row: row.step_no)
+        self._persist("sop_steps", "insert_sop_row", step)
         return step
 
     def all_recipes(self) -> tuple[Recipe, ...]:
@@ -300,13 +322,19 @@ class MemoryProcessRepository:
         return tuple(self._sop.get(int(recipe_id), ()))
 
     def estimate_minutes(self, dish_id: int, *, default_min: int = 15) -> int:
-        """预计出餐分钟数。无 SOP 的菜取**保守默认值**，不取下限 5 分钟。
+        """预计出餐分钟数，优先级：人工难度标定 > SOP 步骤时长 > 保守默认值。
 
-        这是「按交期最近派单」能否成立的关键一处：没配方的菜没有工艺时长，
-        按 5 分钟算会让它**永远插在队首**，于是「先做哪单」变成「哪道菜没配
-        SOP 就先做」——估得准的菜反而被排到后面。取保守值（默认 15 分钟）
-        让不确定的菜不占便宜，等它补上 SOP 再按真实时长算。
+        `prep_minutes` 是按烹饪难度标定的参考时长（凉菜几分钟、炖菜几十分钟），
+        由种子/管理端维护，菜单展示、购物车汇总、下单交期都读它，因此不同菜
+        的参考时长能真实反映难度，而不是一刀切 15 分钟。
+
+        没有标定值时退回 SOP 工艺时长（青椒肉丝等）；连 SOP 都没有才取保守
+        默认值——按 5 分钟算会让没配方的菜**永远插在队首**，于是「先做哪单」
+        变成「哪道菜没配 SOP 就先做」。取保守值让不确定的菜不占便宜。
         """
+        dish = self._dishes.get(int(dish_id))
+        if dish is not None and dish.prep_minutes > 0:
+            return int(dish.prep_minutes)
         recipe = self.recipe_for(dish_id)
         if recipe is None:
             return max(1, int(default_min))
@@ -317,6 +345,15 @@ class MemoryProcessRepository:
         if supplier_id in self._suppliers:
             raise DuplicateError(f"supplier_id {supplier_id} 已存在")
         self._suppliers[supplier_id] = dict(row)
+        self._persist("suppliers", lambda r: self.recorder.insert_supplier_row(
+            supplier_id, r), self._suppliers[supplier_id])
+
+    def put_supplier(self, supplier_id: int, row: dict[str, Any]) -> None:
+        """新增或更新供应商（管理端录入入口）。id 复用既有行即更新。"""
+        self._suppliers[int(supplier_id)] = dict(row)
+        self._persist("suppliers", lambda r: r.upsert_supplier_row(
+            int(supplier_id), self._suppliers[int(supplier_id)]),
+            self._suppliers[int(supplier_id)])
 
     def add_batch(self, batch_id: int, row: dict[str, Any]) -> None:
         if batch_id in self._batches:
@@ -328,9 +365,112 @@ class MemoryProcessRepository:
         for key in ("produced_at", "expire_at"):
             normalized[key] = parse_datetime(row.get(key))
         self._batches[batch_id] = normalized
+        self._persist("dish_batches", lambda r: self.recorder.insert_batch_row(
+            batch_id, r), normalized)
+
+    def put_batch(self, batch_id: int, row: dict[str, Any]) -> None:
+        """新增或更新批次。时间归一化与外键校验同 add_batch，避免 str/datetime 混用。"""
+        self.dish(_int(row.get("dish_id")))        # 外键 fk_batches_dish
+        normalized = dict(row)
+        for key in ("produced_at", "expire_at"):
+            normalized[key] = parse_datetime(row.get(key))
+        self._batches[int(batch_id)] = normalized
+        self._persist("dish_batches", lambda r: r.upsert_batch_row(
+            int(batch_id), self._batches[int(batch_id)]), normalized)
+
+    # ------------------------------------------------------------ 原料批次
+    def add_ingredient_batch(self, batch_id: int, row: dict[str, Any]) -> None:
+        if batch_id in self._ingredient_batches:
+            raise DuplicateError(f"ingredient_batch_id {batch_id} 已存在")
+        self.supplier(_int(row.get("supplier_id")))  # 外键：原料必有其供应商
+        normalized = self._normalize_ingredient_batch(row)
+        self._ingredient_batches[batch_id] = normalized
+        self._persist("ingredient_batches",
+                      lambda r: self.recorder.insert_ingredient_batch_row(batch_id, r),
+                      normalized)
+
+    def put_ingredient_batch(self, batch_id: int, row: dict[str, Any]) -> None:
+        """新增或更新原料批次（管理端录入/编辑入口）。"""
+        self.supplier(_int(row.get("supplier_id")))
+        normalized = self._normalize_ingredient_batch(row)
+        self._ingredient_batches[int(batch_id)] = normalized
+        self._persist("ingredient_batches",
+                      lambda r: r.upsert_ingredient_batch_row(
+                          int(batch_id), self._ingredient_batches[int(batch_id)]),
+                      normalized)
+
+    @staticmethod
+    def _normalize_ingredient_batch(row: dict[str, Any]) -> dict[str, Any]:
+        """时间归一到带时区 datetime、检疫 JSON 归一到 dict——与成品批次同口径。
+
+        漏掉的后果是扫码时 `expire_at < datetime` 抛 TypeError，而这条链路
+        开发环境根本没人点，直到顾客扫码才炸。
+        """
+        normalized = dict(row)
+        for key in ("received_at", "expire_at"):
+            normalized[key] = parse_datetime(row.get(key))
+        normalized["inspection"] = _json_object(row.get("inspection"))
+        return normalized
+
+    def ingredient_batch_ids(self) -> tuple[int, ...]:
+        return tuple(sorted(self._ingredient_batches))
+
+    def ingredient_batch(self, batch_id: int) -> dict[str, Any]:
+        found = self._ingredient_batches.get(int(batch_id))
+        if found is None:
+            raise NotFoundError(f"原料批次 {batch_id} 不存在")
+        return dict(found)
+
+    def ingredient_batches_of(self, ingredient_name: str) -> tuple[dict[str, Any], ...]:
+        """某原料的全部到货批次（先按未过期、再按到货时间倒序）。
+
+        配方项只存原料名（`猪里脊`），同名原料可能到货多批；取未过期且最新
+        的一批作为「这盘菜用的原料」，过期批次仍返回但排在后面，供追溯展示。
+        """
+        key = str(ingredient_name).strip()
+        rows = [dict(row) for row in self._ingredient_batches.values()
+                if str(row.get("ingredient_name") or "").strip() == key]
+        now = datetime.now(CST)
+        rows.sort(key=lambda r: (
+            bool(r.get("expire_at")) and r["expire_at"] < now,
+            -(r.get("received_at").timestamp() if isinstance(r.get("received_at"), datetime) else 0),
+        ))
+        return tuple(rows)
 
     def batch_ids(self) -> tuple[int, ...]:
         return tuple(sorted(self._batches))
+
+    def expired_batch_of(self, dish_id: int, now: datetime) -> dict[str, Any] | None:
+        """菜品是否"全部关联批次都过期"——用于售卖门禁。
+
+        规则（与 #14 应留样、#15 出库门禁同口径，取最严）：
+        - 该菜没有任何批次 → 返回 None（没有批次信息，不构成下架理由，照常卖）。
+         新扩充的菜品大多没有批次，不能因此全下架。
+        - 有批次但存在任一未过期 → 返回 None（还有新鲜批次可用，照常卖）。
+        - 有批次且全部过期 → 返回最早过期的那条批次（含 batch_no/expire_at），
+          菜单据此标"已下架"，下单据此拦截。
+
+        返回 datetime 供上层格式化，不在仓储层拼中文文案（分层）。
+        """
+        rows = [self._batches[bid] for bid in self._batches
+                if _int(self._batches[bid].get("dish_id")) == int(dish_id)]
+        if not rows:
+            return None
+        # 统一到同一时区口径再比：批次是 aware，而调用方（测试/脚本）可能传 naive
+        # 的 now。直接 `<` 会抛「can't compare offset-naive and offset-aware」，
+        # 让售卖门禁在那一刻整个失效。naive 按本地 CST 解释。
+        ref = parse_datetime(now)
+        fresh = [r for r in rows
+                 if not (isinstance(r.get("expire_at"), datetime)
+                         and r["expire_at"] < ref)]
+        if fresh:
+            return None
+        # 全部过期：给出最早过期的一条作为代表原因
+        expired = [r for r in rows if isinstance(r.get("expire_at"), datetime)]
+        if not expired:
+            return None
+        expired.sort(key=lambda r: r["expire_at"])
+        return dict(expired[0])
 
     def add_trace_code(self, code: str, row: dict[str, Any]) -> None:
         key = code.strip().upper()
@@ -342,6 +482,32 @@ class MemoryProcessRepository:
         normalized = dict(row)
         normalized["payload"] = _json_object(row.get("payload"))
         self._trace[key] = normalized
+        self._persist("trace_codes", lambda r: self.recorder.insert_trace_row(
+            key, r), normalized)
+
+    def put_trace_code(self, code: str, row: dict[str, Any]) -> None:
+        """新增或更新溯源码（管理端录入入口）。外键校验同 add_trace_code。"""
+        key = str(code).strip().upper()
+        if not key:
+            raise ValueError("溯源码不能为空")
+        batch_id = row.get("batch_id")
+        if batch_id not in (None, ""):
+            if _int(batch_id) not in self._batches:
+                raise ForeignKeyError(f"批次 {batch_id} 不存在（fk_trace_batch）")
+        supplier_id = row.get("supplier_id")
+        if supplier_id not in (None, ""):
+            if _int(supplier_id) not in self._suppliers:
+                raise ForeignKeyError(f"供应商 {supplier_id} 不存在（fk_trace_supplier）")
+        normalized = dict(row)
+        normalized["payload"] = _json_object(row.get("payload"))
+        normalized["created_at"] = parse_datetime(row.get("created_at")) or self._now()
+        self._trace[key] = normalized
+        self._persist("trace_codes", lambda r: r.upsert_trace_row(key, normalized),
+                      normalized)
+
+    def _now(self) -> datetime:
+        """录入溯源码未填时间时的落库基准（带时区，与种子时间同口径）。"""
+        return parse_datetime(datetime.now().isoformat())
 
     def batch(self, batch_id: int) -> dict[str, Any]:
         found = self._batches.get(int(batch_id))
@@ -393,9 +559,26 @@ class MemoryProcessRepository:
             "sop_steps": sum(len(rows) for rows in self._sop.values()),
             "suppliers": len(self._suppliers),
             "batches": len(self._batches),
+            "ingredient_batches": len(self._ingredient_batches),
             "trace_codes": len(self._trace),
         }
 
     def iter_sop(self) -> Iterable[SopStep]:
         for rows in self._sop.values():
             yield from rows
+
+    # ------------------------------------------------------------ 内部
+    def _persist(self, what: str, method: Any, entity: Any) -> None:
+        """落库旁路（A23）：写器未装配或写失败都不影响内存主路径。
+
+        `method` 传**方法名字符串**（在确认 `recorder` 非 None 后才 getattr），
+        或已捕获外部参数的 lambda——绑定方法不能提前求值，否则写器未装配时
+        AttributeError 会在业务主路径上炸出来。
+        失败已在写器内计数，这里只防意外异常外溢。"""
+        if self.recorder is None:
+            return
+        try:
+            fn = getattr(self.recorder, method) if isinstance(method, str) else method
+            fn(entity)
+        except Exception:  # pragma: no cover - 双保险
+            log.warning("配置资料落库失败（%s）", what, exc_info=True)

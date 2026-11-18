@@ -117,7 +117,7 @@ class TestPlace:
         assert svc.orders() == ()
 
     def test_停售菜被拒(self, repo, svc):
-        repo.add_dish(dish_id=9, code="D-STOP", name="下架菜", enabled=False)
+        repo.add_dish(dish_id=9009, code="D-STOP", name="下架菜", enabled=False)
         with pytest.raises(OrderError):
             simple_order(svc, ("D-STOP", 1))
 

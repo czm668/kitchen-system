@@ -144,6 +144,10 @@ class Dish:
     price: float = 0.0
     sold_out: bool = False
     enabled: bool = True
+    #: 人工按烹饪难度标定的参考制作时长（分钟）。>0 时作为权威值优先于 SOP，
+    #: 让菜单/购物车展示和下单交期按难度区分（凉菜几分钟、炖菜几十分钟）。
+    #: 0 表示未标定，回退到 SOP 步骤时长、再回退到保守默认值。
+    prep_minutes: int = 0
 
     @property
     def station_kind(self) -> str:
@@ -154,6 +158,29 @@ class Dish:
         """
         return {"凉菜": "cold_dish", "冷菜": "cold_dish", "素菜": "stove",
                 "热菜": "stove", "主食": "stove"}.get(self.category, "stove")
+
+
+@dataclass(frozen=True)
+class IngredientBatch:
+    """原料批次（`ingredient_batches`）：溯源真正要回答的「这批肉/菜哪来的」。
+
+    与 `dish_batches`（成品出餐批次，供留样/出库门禁）分开：菜品按配方用到
+    若干原料，每个原料按 `ingredient_name` 落到自己的到货批次与检疫报告。
+    `ingredient_name` 刻意与 `RecipeItem.ingredient` 同名——配方清单就是骨架。
+    """
+
+    id: int
+    batch_no: str
+    ingredient_name: str
+    supplier_id: int
+    received_at: datetime
+    expire_at: datetime
+    inspection: dict[str, object]
+    state: str = "received"
+
+    @property
+    def expired(self) -> bool:
+        return self.expire_at < datetime.now(CST)
 
 
 @dataclass(frozen=True)

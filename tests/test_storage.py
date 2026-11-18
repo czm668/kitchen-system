@@ -2,8 +2,8 @@
 """A1 运行时库：建库同源、遥测/告警落库、跨重启历史、AppState 接线。
 
 口径：
-- DDL 必须来自 migrations/001-017（同一份源经 tools.migrate 翻译），
-  表数与主控清单口径（42 主线表 + 4 张 A11 + 3 张 A12 + 1 张 A13 = 50）一致；
+- DDL 必须来自 migrations/001-019（同一份源经 tools.migrate 翻译），
+  表数与主控清单口径（42 主线表 + 4 张 A11 + 3 张 A12 + 1 张 A13 + 1 张 A24 = 51）一致；
 - `db_path=None` 时行为与旧版完全一致（纯内存）——既有 1242 条用例零影响。
 """
 from __future__ import annotations
@@ -19,7 +19,7 @@ from api_support import data_of, login, make_server, make_state
 TS = datetime(2026, 11, 13, 11, 30, 0)
 
 
-def test_建库与迁移同源_50表(tmp_path):
+def test_建库与迁移同源_51表(tmp_path):
     conn = open_runtime_db(tmp_path / "run.db")
     tables = {
         row[0]
@@ -28,7 +28,7 @@ def test_建库与迁移同源_50表(tmp_path):
         )
     }
     assert {"sensor_readings", "alarm_events", "audit_logs", "devices"} <= tables
-    assert len(tables) == 50, sorted(tables)
+    assert len(tables) == 51, sorted(tables)
     assert db_stats(conn)["sensor_readings"] == 0
     conn.close()
 

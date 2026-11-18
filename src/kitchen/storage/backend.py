@@ -162,6 +162,53 @@ class RuntimeDB:
                     pass
         return rows
 
+    # ------------------------------------------------------------ 幂等写
+    def insert_ignore(self, table: str, columns: Sequence[str],
+                      row: Sequence[Any]) -> None:
+        """冲突即跳过的插入（基线物化用，等价 MySQL `INSERT IGNORE`）。
+
+        基线同步的前提是「内存里有的 = 库里也要有」，已存在的行以库内为准
+        （首次物化后再同步就是空操作），所以用 IGNORE 而不是覆盖写。
+        """
+        if self.dialect == "sqlite":
+            verb = "INSERT OR IGNORE INTO"
+        else:
+            verb = "INSERT IGNORE INTO"
+        sql = (f"{verb} {self._quote(table)} ({self._collist(columns)}) "
+               f"VALUES ({self._ph(len(columns))})")
+        self.execute(sql, row)
+
+    def upsert(self, table: str, columns: Sequence[str], row: Sequence[Any], *,
+               conflict: Sequence[str]) -> None:
+        """存在即更新的插入（运行期快照写）。
+
+        - SQLite：`ON CONFLICT (...) DO UPDATE SET c = excluded.c`；
+        - MySQL：`AS new ON DUPLICATE KEY UPDATE c = new.c`（8.0.19+ 行别名，
+          规避 `VALUES(col)` 在 8.0.20+ 的弃用告警；compose 固定 mysql:8.4）。
+
+        为什么不用 REPLACE INTO：REPLACE 的语义是「先 DELETE 再 INSERT」，
+        而orders/staff 这类父表被子表外键引用（fk_items_order、fk_cards_staff），
+        删除会撞外键 RESTRICT——子表有数据后父表就再也写不进去。UPSERT 原地
+        更新，不碰外键。
+        """
+        if self.dialect == "sqlite":
+            sets = ", ".join(f'{self._quote(c)} = excluded.{self._quote(c)}'
+                             for c in columns)
+            conflict_part = "ON CONFLICT (" + self._collist(conflict) + ") DO UPDATE SET "
+        else:
+            sets = ", ".join(f"{self._quote(c)} = new.{self._quote(c)}"
+                             for c in columns)
+            conflict_part = "AS new ON DUPLICATE KEY UPDATE "
+        sql = (f"INSERT INTO {self._quote(table)} ({self._collist(columns)}) "
+               f"VALUES ({self._ph(len(columns))}) {conflict_part}{sets}")
+        self.execute(sql, row)
+
+    def _collist(self, columns: Sequence[str]) -> str:
+        return ", ".join(self._quote(c) for c in columns)
+
+    def _ph(self, count: int) -> str:
+        return ", ".join([self.placeholder] * count)
+
     # ------------------------------------------------------------ 事务
     def commit(self) -> None:
         self._raw.commit()

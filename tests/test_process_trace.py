@@ -136,4 +136,5 @@ class TestLabel:
 
 def test_快照():
     snap = make().snapshot()
-    assert snap == {"suppliers": 2, "batches": 1, "trace_codes": 1}
+    assert snap == {"suppliers": 5, "batches": 24,
+                    "ingredient_batches": 49, "trace_codes": 24}

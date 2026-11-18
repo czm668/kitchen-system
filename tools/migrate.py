@@ -645,8 +645,8 @@ EXPECTED_TABLES = (
     # ③ 过程执行 6
     "process_events", "dish_recipes", "dish_recipe_items", "sop_steps",
     "dish_batches", "retention_samples",
-    # ④ 批次/扫码 2
-    "suppliers", "trace_codes",
+    # ④ 批次/扫码 3（原料批次是溯源主体，成品批次只管留样/门禁）
+    "suppliers", "trace_codes", "ingredient_batches",
     # ⑤ 环境与冷链 4
     "env_points", "env_thresholds", "device_baselines", "offline_records",
     # ⑥ AI 视觉 1

@@ -36,6 +36,7 @@ import logging
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
+from typing import Any
 
 from kitchen.domain import CST, DomainError
 
@@ -143,11 +144,14 @@ class CookingSession:
         session_uid: str | None = None,
         clock: Callable[[], datetime] | None = None,
         min_abs_g: float = MIN_ABS_TOLERANCE_G,
+        recorder: Any = None,
     ) -> None:
         self.repo = repo
         self.orders = orders
         self._clock = clock or (lambda: datetime.now(CST))
         self.min_abs_g = float(min_abs_g)
+        #: 业务落库写器（A23）：每次 _emit 后把过程事件追加进 process_events。
+        self.recorder = recorder
 
         order, item = orders.item(item_id)
         self.order: Order = order
@@ -336,6 +340,12 @@ class CookingSession:
         )
         self._next_event += 1
         self._events.append(event)
+        if self.recorder is not None:
+            try:
+                self.recorder.append_process_event(event)
+            except Exception:  # pragma: no cover - 写器内已吞错，双保险
+                log.warning("工序事件落库异常（%s #%s）", event.kind, event.id,
+                            exc_info=True)
         return event
 
     def summary(self) -> dict[str, object]:
@@ -369,9 +379,9 @@ class CookingBoard:
 
     ## 出餐后不清 `process_events`
 
-    事件是 `CookingSession._emit` 写进 `self._events` 的（随会话消亡）——
-    MySQL 部署时 `process_events` 表由迁移 001-013 落库，内存版只是演示；
-    真机/联调阶段把 `_events` 搬进队列补传，这里不重复设计。
+    事件由 `CookingSession._emit` 产生：内存里随会话消亡，但**落库后跨重启可查**
+    （A23：写器存在时同步追加进 `process_events` 表）——日管控台账要按时间线
+    汇总全部关键操作，内存态只够当次请求用。
     """
 
     def __init__(
@@ -384,6 +394,8 @@ class CookingBoard:
         self.repo = repo
         self.orders = orders
         self._clock = clock
+        #: 业务落库写器（A23），由 `api/state.py` 装配后注入并传给会话
+        self.recorder: Any = None
         self._sessions: dict[int, CookingSession] = {}
 
     # ------------------------------------------------------------ 会话
@@ -401,7 +413,7 @@ class CookingBoard:
             return found
         made = CookingSession(
             self.repo, self.orders, key,
-            session_uid=session_uid, clock=self._clock,
+            session_uid=session_uid, clock=self._clock, recorder=self.recorder,
         )
         self._sessions[key] = made
         return made
@@ -411,7 +423,7 @@ class CookingBoard:
         key = int(item_id)
         self._sessions.pop(key, None)
         made = CookingSession(
-            self.repo, self.orders, key, clock=self._clock,
+            self.repo, self.orders, key, clock=self._clock, recorder=self.recorder,
         )
         self._sessions[key] = made
         return made
@@ -461,6 +473,7 @@ class CookingBoard:
         if session is None:
             transient = CookingSession(
                 self.repo, self.orders, key, clock=self._clock,
+                recorder=self.recorder,
             )
             session = transient
         order, item = self.orders.item(key)

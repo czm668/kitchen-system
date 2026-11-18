@@ -122,7 +122,7 @@ class TestDispatch:
 
     def test_冷菜要冷菜工位(self):
         _clock, repo, svc, board = make()
-        repo.add_dish(dish_id=9, code="D-LC", name="凉拌黄瓜", category="凉菜")
+        repo.add_dish(dish_id=9009, code="D-LC", name="凉拌黄瓜", category="凉菜")
         order = svc.place_order(table_id=1, items=[("D-LC", 1)])
         decisions = board.dispatch_pending()
         assert not decisions[0].ok, "只有灶台工位，冷菜不该被派上去"

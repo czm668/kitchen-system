@@ -38,6 +38,7 @@ import logging
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
+from typing import Any
 
 from kitchen.domain import CST, DomainError, NotFoundError
 
@@ -186,6 +187,8 @@ class RetentionService:
         self._next_sample = 1
         self._next_task = 1
         self._next_event = 1
+        #: 业务落库写器（A23）：达标样本/销毁态/过程事件各落一次。None = 纯内存。
+        self.recorder: Any = None
 
     # ------------------------------------------------------------ 视图
     def now(self) -> datetime:
@@ -350,6 +353,7 @@ class RetentionService:
             existing.destroy_due_at = due
             existing.state = "stored"
             existing.destroyed_at = None
+            self._persist_sample(existing)
             log.info("留样更新：%s", existing.describe())
             return check
 
@@ -363,6 +367,7 @@ class RetentionService:
         )
         self._next_sample += 1
         self._samples[target.batch_id] = sample
+        self._persist_sample(sample)
         log.info("留样达标：%s", sample.describe())
         return check
 
@@ -444,6 +449,7 @@ class RetentionService:
         sample.state = "destroyed"
         sample.destroyed_at = moment
         task.state = "closed"
+        self._persist_sample(sample)
         self._emit("destroyed", {
             "sample_id": sample.id,
             "order_no": task.order_no,
@@ -501,4 +507,24 @@ class RetentionService:
         )
         self._next_event += 1
         self._events.append(event)
+        self._persist_event(event)
         return event
+
+    # ------------------------------------------------------------ 落库旁路（A23）
+    def _persist_sample(self, sample: RetentionSample) -> None:
+        """达标/销毁态快照。失败只计数不抛——台账查询靠内存态也自洽。"""
+        if self.recorder is None:
+            return
+        try:
+            self.recorder.upsert_retention_sample(sample)
+        except Exception:  # pragma: no cover - 双保险
+            log.warning("留样落库异常（样本 %s）", sample.id, exc_info=True)
+
+    def _persist_event(self, event: ProcessEvent) -> None:
+        if self.recorder is None:
+            return
+        try:
+            self.recorder.append_process_event(event)
+        except Exception:  # pragma: no cover - 双保险
+            log.warning("留样事件落库异常（%s #%s）", event.state, event.id,
+                        exc_info=True)

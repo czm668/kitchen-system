@@ -42,7 +42,7 @@ import logging
 from collections.abc import Callable
 from dataclasses import dataclass, field, replace
 from datetime import datetime
-from typing import Protocol, runtime_checkable
+from typing import Any, Protocol, runtime_checkable
 
 from kitchen.domain import CST, DomainError, InvalidTransition, NotFoundError
 
@@ -213,6 +213,9 @@ class DispatchBoard:
         #: 人员资质池。None = 不接人员域（只派工位，不指派人）——装硬件前的演示
         #: 与「厨师自己找灶」的小店模式都是这种，不该强迫配置人员数据
         self.matcher = matcher
+        #: 业务落库写器（A23）：占用会话开/关/点火确认各落一次快照。
+        #: None = 纯内存（既有默认）。
+        self.recorder: Any = None
 
         self._occupancies: dict[int, StationOccupancy] = {}   # 会话 id → 会话
         self._open_by_station: dict[int, int] = {}            # 工位 → 会话 id
@@ -225,6 +228,15 @@ class DispatchBoard:
     # ------------------------------------------------------------ 时间
     def now(self) -> datetime:
         return self._clock()
+
+    def _persist(self, session: "StationOccupancy") -> None:
+        """占用会话快照落库（A23 旁路）：失败只计数，不影响主路径。"""
+        if self.recorder is None:
+            return
+        try:
+            self.recorder.upsert_occupancy(session)
+        except Exception:  # pragma: no cover - 双保险
+            log.warning("占用会话落库异常（会话 %s）", session.id, exc_info=True)
 
     # ------------------------------------------------------------ 工位视图
     def station_state(self, station_id: int) -> str:
@@ -308,6 +320,7 @@ class DispatchBoard:
         self._next_occ += 1
         self._occupancies[session.id] = session
         self._open_by_station[station.id] = session.id
+        self._persist(session)
         if item_id is not None:
             self._reserved.pop(station.id, None)
             self._assigned.pop(item_id, None)
@@ -331,6 +344,7 @@ class DispatchBoard:
         session = self._occupancies[session_id].close(moment)
         self._occupancies[session_id] = session
         self._flame.pop(int(station_id), None)
+        self._persist(session)
         log.info("出餐释放：ST%s（%s，占用 %.0fs）", station_id, reason,
                  session.elapsed_sec(moment))
         return session
@@ -359,6 +373,7 @@ class DispatchBoard:
         if session.flame_verified or (value is not None and value >= self.flame_threshold):
             if not session.flame_verified:
                 self._occupancies[session.id] = replace(session, flame_verified=True)
+                self._persist(self._occupancies[session.id])
             return FlameVerdict(int(station_id), True, True, waited,
                                 f"火焰 {value:.2f} ≥ {self.flame_threshold}")
         if waited < self.flame_grace_sec:

@@ -21,8 +21,9 @@ class TestSeed:
     def test_七类资料都有(self, repo):
         snap = repo.snapshot()
         assert snap == {
-            "dishes": 4, "stations": 2, "recipes": 2, "recipe_items": 6,
-            "sop_steps": 8, "suppliers": 2, "batches": 1, "trace_codes": 1,
+            "dishes": 24, "stations": 2, "recipes": 2, "recipe_items": 6,
+            "sop_steps": 8, "suppliers": 5, "batches": 24,
+            "ingredient_batches": 49, "trace_codes": 24,
         }
 
     def test_菜品编码大小写都查得到(self, repo):
@@ -46,14 +47,40 @@ class TestSeed:
         assert repo.recipe_items(None) == ()
         assert repo.sop_steps(None) == ()
 
-    def test_预计交期由SOP时长算出(self, repo):
-        """青椒肉丝 6 步合计 635 秒 ≈ 11 分钟，加 2 分钟装盘 → 13 分钟。"""
-        assert repo.estimate_minutes(1) == 13
+    def test_有难度标定的菜按标定值(self, repo):
+        """青椒肉丝按难度标定 14 分钟（近似其 SOP 11 分钟 + 装盘），优先于 SOP。"""
+        assert repo.estimate_minutes(1) == 14
+        assert repo.dish(1).prep_minutes == 14
 
-    def test_没配方的菜取保守值(self, repo):
-        """按 5 分钟算会让它永远插队首——「先做哪单」变成「哪道菜没配 SOP」。"""
-        assert repo.estimate_minutes(3) == 15
-        assert repo.estimate_minutes(3, default_min=20) == 20
+    def test_没标定也没配方的菜取保守值(self, repo):
+        """按 5 分钟算会让它永远插队首——「先做哪单」变成「哪道菜没配 SOP」。
+
+        用新建的无标定菜验证回退路径，别拿已标定的种子菜（会走标定值）。
+        """
+        repo.add_dish(dish_id=9010, code="D-NOEST", name="无标定菜")
+        assert repo.estimate_minutes(9010) == 15
+        assert repo.estimate_minutes(9010, default_min=20) == 20
+
+    def test_没标定但有SOP的菜按SOP时长算出(self, repo):
+        """无人工标定才退回 SOP：6 步合计 635 秒 ≈ 11 分钟 + 2 分钟装盘 → 13。"""
+        repo.add_dish(dish_id=9011, code="D-SOPONLY", name="仅SOP菜")
+        repo.add_recipe(recipe_id=9011, dish_id=9011)
+        for idx, sec in enumerate([180, 300, 30, 45, 60, 20], start=1):
+            repo.add_sop_step(step_id=9000 + idx, recipe_id=9011, step_no=idx,
+                              title=f"步骤{idx}", duration_sec=sec)
+        assert repo.estimate_minutes(9011) == 13
+
+    def test_参考时长按难度拉开档次(self, repo):
+        """凉菜/饮品最快、快炒居中、红烧炖烤最慢——避免一刀切 15 分钟。"""
+        assert repo.estimate_minutes(18) == 3   # 米饭（现成）
+        assert repo.estimate_minutes(10) == 5   # 凉拌黄瓜
+        assert repo.estimate_minutes(3) == 8    # 清炒时蔬
+        assert repo.estimate_minutes(1) == 14   # 青椒肉丝（快炒肉）
+        assert repo.estimate_minutes(5) == 60   # 红烧肉（焖煮）
+        assert repo.estimate_minutes(7) == 90   # 烤鸭（烤制）
+        # 同一档次内也有差异，而不是全都相等
+        values = {repo.estimate_minutes(d.id) for d in repo.dishes() if d.prep_minutes > 0}
+        assert len(values) >= 10, "24 道菜的参考时长不该挤在少数几个值上"
 
     def test_小料按绝对容差判(self, repo):
         """生抽 8g 的 5% 只有 0.4g，HX711 抖一下就超出；必须抬到 ±1g。"""

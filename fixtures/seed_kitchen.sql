@@ -26,11 +26,46 @@ INSERT IGNORE INTO dining_tables (id, code, seats, area, state) VALUES
   (3, 'T03', 2, '靠窗', 'idle');
 
 -- ---------------------------------------------------------------- 菜品
-INSERT IGNORE INTO dishes (id, code, name, category, price, sold_out, enabled, created_at) VALUES
-  (1, 'D-QJRS', '青椒肉丝', '热菜', 28.0, 0, 1, '2026-11-12 09:00:00'),
-  (2, 'D-GBJD', '宫保鸡丁', '热菜', 32.0, 0, 1, '2026-11-12 09:00:00'),
-  (3, 'D-QGD',  '清炒时蔬', '素菜', 18.0, 1, 1, '2026-11-12 09:00:00'),
-  (4, 'D-SLTD', '酸辣土豆丝', '素菜', 16.0, 0, 1, '2026-11-12 09:00:00');
+-- 全品类菜单（24 道 / 7 类）：前端按 category 自动生成分类导航。
+-- 前 4 道是原有固定 code，测试与扫码演示都依赖，保持不变；后续新增不带批次/配方，
+-- 因此照常售卖（过期门禁只作用于有批次且全部过期的菜）。
+-- 命名口径：品类用「热菜/凉菜/素菜/汤羹/主食/甜品/饮品」七值，大小写与前端一致。
+-- prep_minutes 按烹饪难度标定（分钟），参考常见家常菜/食堂出餐时长：
+--   现成/冲调（米饭、橙汁、酸梅汤）3~5；凉菜 5~8；快炒素菜/蛋汤 8~12；
+--   快炒肉菜 13~15；现做主食与水煮/拔丝 15~25；红烧/炖汤/烤制 40~90。
+--   它是菜单与交期的「参考值」，故意拉开档次，避免一刀切 15 分钟。
+INSERT IGNORE INTO dishes (id, code, name, category, price, prep_minutes, sold_out, enabled, created_at) VALUES
+  (1, 'D-QJRS', '青椒肉丝', '热菜', 28.0, 14, 0, 1, '2026-11-12 09:00:00'),
+  (2, 'D-GBJD', '宫保鸡丁', '热菜', 32.0, 16, 0, 1, '2026-11-12 09:00:00'),
+  (3, 'D-QGD',  '清炒时蔬', '素菜', 18.0, 8, 1, 1, '2026-11-12 09:00:00'),
+  (4, 'D-SLTD', '酸辣土豆丝', '素菜', 16.0, 10, 0, 1, '2026-11-12 09:00:00'),
+  -- 热菜
+  (5, 'D-HSJR', '红烧肉', '热菜', 42.0, 60, 0, 1, '2026-11-12 09:00:00'),
+  (6, 'D-SYR',  '水煮鱼', '热菜', 58.0, 25, 0, 1, '2026-11-12 09:00:00'),
+  (7, 'D-KSJD', '烤鸭', '热菜', 68.0, 90, 0, 1, '2026-11-12 09:00:00'),
+  (8, 'D-MJRS', '木须肉', '热菜', 30.0, 15, 0, 1, '2026-11-12 09:00:00'),
+  -- 凉菜
+  (9, 'D-LJHD', '凉拌海带丝', '凉菜', 12.0, 8, 0, 1, '2026-11-12 09:00:00'),
+  (10,'D-LJHG', '凉拌黄瓜', '凉菜', 10.0, 5, 0, 1, '2026-11-12 09:00:00'),
+  (11,'D-ZR',   '酱牛肉', '凉菜', 38.0, 20, 0, 1, '2026-11-12 09:00:00'),
+  (12,'D-PD',   '皮蛋豆腐', '凉菜', 14.0, 5, 0, 1, '2026-11-12 09:00:00'),
+  -- 素菜
+  (13,'D-DSH',  '地三鲜', '素菜', 22.0, 15, 0, 1, '2026-11-12 09:00:00'),
+  (14,'D-SC',   '手撕包菜', '素菜', 18.0, 10, 0, 1, '2026-11-12 09:00:00'),
+  -- 汤羹
+  (15,'D-XLDT', '西红柿蛋汤', '汤羹', 16.0, 10, 0, 1, '2026-11-12 09:00:00'),
+  (16,'D-ZCST', '紫菜蛋花汤', '汤羹', 14.0, 8, 0, 1, '2026-11-12 09:00:00'),
+  (17,'D-YMJG', '玉米排骨汤', '汤羹', 32.0, 45, 0, 1, '2026-11-12 09:00:00'),
+  -- 主食
+  (18,'D-MIF',  '米饭', '主食', 3.0, 3, 0, 1, '2026-11-12 09:00:00'),
+  (19,'D-JIAOZ','饺子', '主食', 20.0, 15, 0, 1, '2026-11-12 09:00:00'),
+  (20,'D-CHAOM','炒面', '主食', 18.0, 12, 0, 1, '2026-11-12 09:00:00'),
+  -- 甜品
+  (21,'D-HSJG', '红豆沙', '甜品', 12.0, 40, 0, 1, '2026-11-12 09:00:00'),
+  (22,'D-BN',   '拔丝香蕉', '甜品', 20.0, 18, 0, 1, '2026-11-12 09:00:00'),
+  -- 饮品
+  (23,'D-NCZ',  '鲜榨橙汁', '饮品', 15.0, 3, 0, 1, '2026-11-12 09:00:00'),
+  (24,'D-YCH',  '酸梅汤', '饮品', 10.0, 5, 0, 1, '2026-11-12 09:00:00');
 
 -- ---------------------------------------------------------------- 人员（#8/#9/#10）
 -- qualifications 是 JSON 资质集合，#10 派单前与工序要求比对
@@ -173,8 +208,12 @@ INSERT IGNORE INTO device_baselines (id, device_id, metric, baseline, window_sec
 
 -- ---------------------------------------------------------------- 供应商与溯源
 INSERT IGNORE INTO suppliers (id, name, license_no, contact, qualifications, state, created_at) VALUES
-  (1, '鲜丰肉联厂',    'SC11110010001', '刘经理 13900000001', '["营业执照","食品生产许可证"]', 'active', '2026-11-12 07:00:00'),
-  (2, '绿源蔬菜基地',  'SC11110010002', '陈经理 13900000002', '["营业执照","农产品合格证"]',   'active', '2026-11-12 07:00:00');
+  (1, '鲜丰肉联厂',      'SC11110010001', '刘经理 13900000001', '["营业执照","食品生产许可证"]', 'active', '2026-11-12 07:00:00'),
+  (2, '绿源蔬菜基地',    'SC11110010002', '陈经理 13900000002', '["营业执照","农产品合格证"]',   'active', '2026-11-12 07:00:00'),
+  -- 全品类溯源：水产/粮油饮品分别由专营供应商供货，24 道菜均可扫码
+  (3, '滨海水产有限公司','SC11110010003', '周经理 13900000003', '["营业执照","食品生产许可证","水产检疫证"]', 'active', '2026-11-12 07:00:00'),
+  (4, '金穗粮油贸易',    'SC11110010004', '孙经理 13900000004', '["营业执照","食品生产许可证","粮油质量证"]', 'active', '2026-11-12 07:00:00'),
+  (5, '清源饮品厂',      'SC11110010005', '吴经理 13900000005', '["营业执照","饮料生产许可证"]', 'active', '2026-11-12 07:00:00');
 
 INSERT IGNORE INTO dish_batches (id, batch_no, dish_id, produced_at, expire_at, state) VALUES
 -- 【相对时刻】produced_at 锚定「当天 11:30」：写死 '2026-11-12 11:30' 会让
@@ -183,13 +222,169 @@ INSERT IGNORE INTO dish_batches (id, batch_no, dish_id, produced_at, expire_at, 
 -- 【编号】批次号/溯源码不含日期（B-DEMO-001），否则「编号 20261112、
 -- 生产日期今天」的截图会在答辩时被追问。编号只要唯一即可。
   (1, 'B-DEMO-001', 1, CURDATE() + INTERVAL 11 HOUR + INTERVAL 30 MINUTE,
-     CURDATE() + INTERVAL 2 DAY + INTERVAL 11 HOUR + INTERVAL 30 MINUTE, 'produced');
+     CURDATE() + INTERVAL 2 DAY + INTERVAL 11 HOUR + INTERVAL 30 MINUTE, 'produced'),
+-- 下面三批刻意放在「非当日」：#14 应留样清单只认当日生产批次，
+-- 若也锚今天，清单会从 1 条变 4 条，破坏既有验收口径。
+-- 三批保质期各不相同，演示溯源页进度条的绿/橙/红三态：
+-- B-002 还剩约 7 天（新鲜·绿）、B-003 还剩约 1 天（临界·橙）、B-004 已过期（红）。
+  (2, 'B-DEMO-002', 2, CURDATE() - INTERVAL 1 DAY + INTERVAL 10 HOUR,
+     CURDATE() + INTERVAL 6 DAY + INTERVAL 10 HOUR, 'produced'),
+  (3, 'B-DEMO-003', 3, CURDATE() - INTERVAL 2 DAY + INTERVAL 9 HOUR,
+     CURDATE() + INTERVAL 1 DAY + INTERVAL 9 HOUR, 'produced'),
+  (4, 'B-DEMO-004', 4, CURDATE() - INTERVAL 10 DAY + INTERVAL 8 HOUR,
+     CURDATE() - INTERVAL 1 DAY + INTERVAL 8 HOUR, 'produced'),
+-- 其余 20 道菜的批次：同样锚「昨天生产」以免挤进 #14 当日应留样清单（清单仍只认 B-DEMO-001），
+-- expire_at 统一在生产后 6 天（新鲜·绿），保证全品类照常售卖、不触发过期下架门禁。
+  (5, 'B-DEMO-005', 5,  CURDATE() - INTERVAL 1 DAY + INTERVAL 8 HOUR,
+     CURDATE() + INTERVAL 5 DAY + INTERVAL 8 HOUR, 'produced'),
+  (6, 'B-DEMO-006', 6,  CURDATE() - INTERVAL 1 DAY + INTERVAL 9 HOUR,
+     CURDATE() + INTERVAL 5 DAY + INTERVAL 9 HOUR, 'produced'),
+  (7, 'B-DEMO-007', 7,  CURDATE() - INTERVAL 1 DAY + INTERVAL 10 HOUR,
+     CURDATE() + INTERVAL 5 DAY + INTERVAL 10 HOUR, 'produced'),
+  (8, 'B-DEMO-008', 8,  CURDATE() - INTERVAL 1 DAY + INTERVAL 11 HOUR,
+     CURDATE() + INTERVAL 5 DAY + INTERVAL 11 HOUR, 'produced'),
+  (9, 'B-DEMO-009', 9,  CURDATE() - INTERVAL 1 DAY + INTERVAL 12 HOUR,
+     CURDATE() + INTERVAL 5 DAY + INTERVAL 12 HOUR, 'produced'),
+  (10,'B-DEMO-010', 10, CURDATE() - INTERVAL 1 DAY + INTERVAL 13 HOUR,
+     CURDATE() + INTERVAL 5 DAY + INTERVAL 13 HOUR, 'produced'),
+  (11,'B-DEMO-011', 11, CURDATE() - INTERVAL 1 DAY + INTERVAL 8 HOUR,
+     CURDATE() + INTERVAL 5 DAY + INTERVAL 8 HOUR, 'produced'),
+  (12,'B-DEMO-012', 12, CURDATE() - INTERVAL 1 DAY + INTERVAL 9 HOUR,
+     CURDATE() + INTERVAL 5 DAY + INTERVAL 9 HOUR, 'produced'),
+  (13,'B-DEMO-013', 13, CURDATE() - INTERVAL 1 DAY + INTERVAL 10 HOUR,
+     CURDATE() + INTERVAL 5 DAY + INTERVAL 10 HOUR, 'produced'),
+  (14,'B-DEMO-014', 14, CURDATE() - INTERVAL 1 DAY + INTERVAL 11 HOUR,
+     CURDATE() + INTERVAL 5 DAY + INTERVAL 11 HOUR, 'produced'),
+  (15,'B-DEMO-015', 15, CURDATE() - INTERVAL 1 DAY + INTERVAL 12 HOUR,
+     CURDATE() + INTERVAL 5 DAY + INTERVAL 12 HOUR, 'produced'),
+  (16,'B-DEMO-016', 16, CURDATE() - INTERVAL 1 DAY + INTERVAL 13 HOUR,
+     CURDATE() + INTERVAL 5 DAY + INTERVAL 13 HOUR, 'produced'),
+  (17,'B-DEMO-017', 17, CURDATE() - INTERVAL 1 DAY + INTERVAL 8 HOUR,
+     CURDATE() + INTERVAL 5 DAY + INTERVAL 8 HOUR, 'produced'),
+  (18,'B-DEMO-018', 18, CURDATE() - INTERVAL 1 DAY + INTERVAL 9 HOUR,
+     CURDATE() + INTERVAL 5 DAY + INTERVAL 9 HOUR, 'produced'),
+  (19,'B-DEMO-019', 19, CURDATE() - INTERVAL 1 DAY + INTERVAL 10 HOUR,
+     CURDATE() + INTERVAL 5 DAY + INTERVAL 10 HOUR, 'produced'),
+  (20,'B-DEMO-020', 20, CURDATE() - INTERVAL 1 DAY + INTERVAL 11 HOUR,
+     CURDATE() + INTERVAL 5 DAY + INTERVAL 11 HOUR, 'produced'),
+  (21,'B-DEMO-021', 21, CURDATE() - INTERVAL 1 DAY + INTERVAL 12 HOUR,
+     CURDATE() + INTERVAL 5 DAY + INTERVAL 12 HOUR, 'produced'),
+  (22,'B-DEMO-022', 22, CURDATE() - INTERVAL 1 DAY + INTERVAL 13 HOUR,
+     CURDATE() + INTERVAL 5 DAY + INTERVAL 13 HOUR, 'produced'),
+  (23,'B-DEMO-023', 23, CURDATE() - INTERVAL 1 DAY + INTERVAL 8 HOUR,
+     CURDATE() + INTERVAL 5 DAY + INTERVAL 8 HOUR, 'produced'),
+  (24,'B-DEMO-024', 24, CURDATE() - INTERVAL 1 DAY + INTERVAL 9 HOUR,
+     CURDATE() + INTERVAL 5 DAY + INTERVAL 9 HOUR, 'produced');
+
+-- ---------------------------------------------------------------- 原料批次（溯源主体）
+-- 溯源的是原料：49 种原料各有到货批次、供应商与检疫报告。
+-- ingredient_name 与 dish_recipe_items.ingredient_name 同名，配方即骨架；
+-- 未在配方标准化的菜，靠 trace_codes.payload.ingredients 声明同样能追到原料。
+-- 日期相对化，生鲜 3-5 天、粮油干货 30 天，避免过期门禁误伤。
+INSERT IGNORE INTO ingredient_batches (id, batch_no, ingredient_name, supplier_id, received_at, expire_at, inspection, state) VALUES
+  (1, 'IB-001', '乌梅', 2, CURDATE() - INTERVAL 2 DAY + INTERVAL 9 HOUR, CURDATE() + INTERVAL 30 DAY + INTERVAL 9 HOUR, '{"项目":"农残","结果":"合格","检验员":"陈质检","报告":"JY-5337"}', 'received'),
+  (2, 'IB-002', '五花肉', 1, CURDATE() - INTERVAL 1 DAY + INTERVAL 10 HOUR, CURDATE() + INTERVAL 5 DAY + INTERVAL 10 HOUR, '{"项目":"兽药残留","结果":"合格","检验员":"王组长","报告":"JY-3339"}', 'received'),
+  (3, 'IB-003', '八角', 4, CURDATE() - INTERVAL 2 DAY + INTERVAL 11 HOUR, CURDATE() + INTERVAL 30 DAY + INTERVAL 11 HOUR, '{"项目":"微生物","结果":"合格","检验员":"孙质检","报告":"JY-3122"}', 'received'),
+  (4, 'IB-004', '冰糖', 4, CURDATE() - INTERVAL 2 DAY + INTERVAL 12 HOUR, CURDATE() + INTERVAL 30 DAY + INTERVAL 12 HOUR, '{"项目":"微生物","结果":"合格","检验员":"孙质检","报告":"JY-4864"}', 'received'),
+  (5, 'IB-005', '包菜', 2, CURDATE() - INTERVAL 1 DAY + INTERVAL 13 HOUR, CURDATE() + INTERVAL 3 DAY + INTERVAL 13 HOUR, '{"项目":"农残","结果":"合格","检验员":"陈质检","报告":"JY-6861"}', 'received'),
+  (6, 'IB-006', '土豆', 2, CURDATE() - INTERVAL 2 DAY + INTERVAL 8 HOUR, CURDATE() + INTERVAL 30 DAY + INTERVAL 8 HOUR, '{"项目":"农残","结果":"合格","检验员":"陈质检","报告":"JY-1903"}', 'received'),
+  (7, 'IB-007', '大米', 4, CURDATE() - INTERVAL 2 DAY + INTERVAL 9 HOUR, CURDATE() + INTERVAL 30 DAY + INTERVAL 9 HOUR, '{"项目":"微生物","结果":"合格","检验员":"孙质检","报告":"JY-7874"}', 'received'),
+  (8, 'IB-008', '嫩豆腐', 4, CURDATE() - INTERVAL 2 DAY + INTERVAL 10 HOUR, CURDATE() + INTERVAL 30 DAY + INTERVAL 10 HOUR, '{"项目":"微生物","结果":"合格","检验员":"孙质检","报告":"JY-8227"}', 'received'),
+  (9, 'IB-009', '山楂', 2, CURDATE() - INTERVAL 2 DAY + INTERVAL 11 HOUR, CURDATE() + INTERVAL 30 DAY + INTERVAL 11 HOUR, '{"项目":"农残","结果":"合格","检验员":"陈质检","报告":"JY-8639"}', 'received'),
+  (10, 'IB-010', '干辣椒', 4, CURDATE() - INTERVAL 2 DAY + INTERVAL 12 HOUR, CURDATE() + INTERVAL 30 DAY + INTERVAL 12 HOUR, '{"项目":"微生物","结果":"合格","检验员":"孙质检","报告":"JY-9689"}', 'received'),
+  (11, 'IB-011', '排骨', 1, CURDATE() - INTERVAL 1 DAY + INTERVAL 13 HOUR, CURDATE() + INTERVAL 5 DAY + INTERVAL 13 HOUR, '{"项目":"兽药残留","结果":"合格","检验员":"王组长","报告":"JY-8833"}', 'received'),
+  (12, 'IB-012', '时令青菜', 2, CURDATE() - INTERVAL 1 DAY + INTERVAL 8 HOUR, CURDATE() + INTERVAL 3 DAY + INTERVAL 8 HOUR, '{"项目":"农残","结果":"合格","检验员":"陈质检","报告":"JY-9086"}', 'received'),
+  (13, 'IB-013', '木耳', 2, CURDATE() - INTERVAL 1 DAY + INTERVAL 9 HOUR, CURDATE() + INTERVAL 3 DAY + INTERVAL 9 HOUR, '{"项目":"农残","结果":"合格","检验员":"陈质检","报告":"JY-3103"}', 'received'),
+  (14, 'IB-014', '橙子', 2, CURDATE() - INTERVAL 1 DAY + INTERVAL 10 HOUR, CURDATE() + INTERVAL 3 DAY + INTERVAL 10 HOUR, '{"项目":"农残","结果":"合格","检验员":"陈质检","报告":"JY-8417"}', 'received'),
+  (15, 'IB-015', '海带', 3, CURDATE() - INTERVAL 1 DAY + INTERVAL 11 HOUR, CURDATE() + INTERVAL 5 DAY + INTERVAL 11 HOUR, '{"项目":"孔雀石绿","结果":"合格","检验员":"周质检","报告":"JY-5905"}', 'received'),
+  (16, 'IB-016', '牛腱子', 1, CURDATE() - INTERVAL 1 DAY + INTERVAL 12 HOUR, CURDATE() + INTERVAL 5 DAY + INTERVAL 12 HOUR, '{"项目":"兽药残留","结果":"合格","检验员":"王组长","报告":"JY-4542"}', 'received'),
+  (17, 'IB-017', '猪肉馅', 1, CURDATE() - INTERVAL 1 DAY + INTERVAL 13 HOUR, CURDATE() + INTERVAL 5 DAY + INTERVAL 13 HOUR, '{"项目":"兽药残留","结果":"合格","检验员":"王组长","报告":"JY-1614"}', 'received'),
+  (18, 'IB-018', '猪里脊', 1, CURDATE() - INTERVAL 1 DAY + INTERVAL 8 HOUR, CURDATE() + INTERVAL 5 DAY + INTERVAL 8 HOUR, '{"项目":"兽药残留","结果":"合格","检验员":"王组长","报告":"JY-3343"}', 'received'),
+  (19, 'IB-019', '玉米', 2, CURDATE() - INTERVAL 1 DAY + INTERVAL 9 HOUR, CURDATE() + INTERVAL 3 DAY + INTERVAL 9 HOUR, '{"项目":"农残","结果":"合格","检验员":"陈质检","报告":"JY-5069"}', 'received'),
+  (20, 'IB-020', '甜面酱', 4, CURDATE() - INTERVAL 2 DAY + INTERVAL 10 HOUR, CURDATE() + INTERVAL 30 DAY + INTERVAL 10 HOUR, '{"项目":"微生物","结果":"合格","检验员":"孙质检","报告":"JY-8265"}', 'received'),
+  (21, 'IB-021', '生抽', 4, CURDATE() - INTERVAL 2 DAY + INTERVAL 11 HOUR, CURDATE() + INTERVAL 30 DAY + INTERVAL 11 HOUR, '{"项目":"微生物","结果":"合格","检验员":"孙质检","报告":"JY-2092"}', 'received'),
+  (22, 'IB-022', '白糖', 4, CURDATE() - INTERVAL 2 DAY + INTERVAL 12 HOUR, CURDATE() + INTERVAL 30 DAY + INTERVAL 12 HOUR, '{"项目":"微生物","结果":"合格","检验员":"孙质检","报告":"JY-6644"}', 'received'),
+  (23, 'IB-023', '白菜', 2, CURDATE() - INTERVAL 1 DAY + INTERVAL 13 HOUR, CURDATE() + INTERVAL 3 DAY + INTERVAL 13 HOUR, '{"项目":"农残","结果":"合格","检验员":"陈质检","报告":"JY-9274"}', 'received'),
+  (24, 'IB-024', '白醋', 4, CURDATE() - INTERVAL 2 DAY + INTERVAL 8 HOUR, CURDATE() + INTERVAL 30 DAY + INTERVAL 8 HOUR, '{"项目":"微生物","结果":"合格","检验员":"孙质检","报告":"JY-5812"}', 'received'),
+  (25, 'IB-025', '皮蛋', 4, CURDATE() - INTERVAL 2 DAY + INTERVAL 9 HOUR, CURDATE() + INTERVAL 30 DAY + INTERVAL 9 HOUR, '{"项目":"微生物","结果":"合格","检验员":"孙质检","报告":"JY-3331"}', 'received'),
+  (26, 'IB-026', '紫菜', 3, CURDATE() - INTERVAL 1 DAY + INTERVAL 10 HOUR, CURDATE() + INTERVAL 5 DAY + INTERVAL 10 HOUR, '{"项目":"孔雀石绿","结果":"合格","检验员":"周质检","报告":"JY-5630"}', 'received'),
+  (27, 'IB-027', '红豆', 4, CURDATE() - INTERVAL 2 DAY + INTERVAL 11 HOUR, CURDATE() + INTERVAL 30 DAY + INTERVAL 11 HOUR, '{"项目":"微生物","结果":"合格","检验员":"孙质检","报告":"JY-6756"}', 'received'),
+  (28, 'IB-028', '胡萝卜', 2, CURDATE() - INTERVAL 1 DAY + INTERVAL 12 HOUR, CURDATE() + INTERVAL 3 DAY + INTERVAL 12 HOUR, '{"项目":"农残","结果":"合格","检验员":"陈质检","报告":"JY-7820"}', 'received'),
+  (29, 'IB-029', '花椒', 4, CURDATE() - INTERVAL 2 DAY + INTERVAL 13 HOUR, CURDATE() + INTERVAL 30 DAY + INTERVAL 13 HOUR, '{"项目":"微生物","结果":"合格","检验员":"孙质检","报告":"JY-2966"}', 'received'),
+  (30, 'IB-030', '花生米', 4, CURDATE() - INTERVAL 2 DAY + INTERVAL 8 HOUR, CURDATE() + INTERVAL 30 DAY + INTERVAL 8 HOUR, '{"项目":"微生物","结果":"合格","检验员":"孙质检","报告":"JY-6205"}', 'received'),
+  (31, 'IB-031', '茄子', 2, CURDATE() - INTERVAL 1 DAY + INTERVAL 9 HOUR, CURDATE() + INTERVAL 3 DAY + INTERVAL 9 HOUR, '{"项目":"农残","结果":"合格","检验员":"陈质检","报告":"JY-2328"}', 'received'),
+  (32, 'IB-032', '草鱼', 3, CURDATE() - INTERVAL 1 DAY + INTERVAL 10 HOUR, CURDATE() + INTERVAL 5 DAY + INTERVAL 10 HOUR, '{"项目":"孔雀石绿","结果":"合格","检验员":"周质检","报告":"JY-2727"}', 'received'),
+  (33, 'IB-033', '葱', 2, CURDATE() - INTERVAL 1 DAY + INTERVAL 11 HOUR, CURDATE() + INTERVAL 3 DAY + INTERVAL 11 HOUR, '{"项目":"农残","结果":"合格","检验员":"陈质检","报告":"JY-3933"}', 'received'),
+  (34, 'IB-034', '蒜', 2, CURDATE() - INTERVAL 1 DAY + INTERVAL 12 HOUR, CURDATE() + INTERVAL 3 DAY + INTERVAL 12 HOUR, '{"项目":"农残","结果":"合格","检验员":"陈质检","报告":"JY-8205"}', 'received'),
+  (35, 'IB-035', '虾皮', 3, CURDATE() - INTERVAL 1 DAY + INTERVAL 13 HOUR, CURDATE() + INTERVAL 5 DAY + INTERVAL 13 HOUR, '{"项目":"孔雀石绿","结果":"合格","检验员":"周质检","报告":"JY-3979"}', 'received'),
+  (36, 'IB-036', '西红柿', 2, CURDATE() - INTERVAL 1 DAY + INTERVAL 8 HOUR, CURDATE() + INTERVAL 3 DAY + INTERVAL 8 HOUR, '{"项目":"农残","结果":"合格","检验员":"陈质检","报告":"JY-6912"}', 'received'),
+  (37, 'IB-037', '豆瓣酱', 4, CURDATE() - INTERVAL 2 DAY + INTERVAL 9 HOUR, CURDATE() + INTERVAL 30 DAY + INTERVAL 9 HOUR, '{"项目":"微生物","结果":"合格","检验员":"孙质检","报告":"JY-8085"}', 'received'),
+  (38, 'IB-038', '青椒', 2, CURDATE() - INTERVAL 1 DAY + INTERVAL 10 HOUR, CURDATE() + INTERVAL 3 DAY + INTERVAL 10 HOUR, '{"项目":"农残","结果":"合格","检验员":"陈质检","报告":"JY-2465"}', 'received'),
+  (39, 'IB-039', '青菜', 2, CURDATE() - INTERVAL 1 DAY + INTERVAL 11 HOUR, CURDATE() + INTERVAL 3 DAY + INTERVAL 11 HOUR, '{"项目":"农残","结果":"合格","检验员":"陈质检","报告":"JY-6416"}', 'received'),
+  (40, 'IB-040', '面条', 4, CURDATE() - INTERVAL 2 DAY + INTERVAL 12 HOUR, CURDATE() + INTERVAL 30 DAY + INTERVAL 12 HOUR, '{"项目":"微生物","结果":"合格","检验员":"孙质检","报告":"JY-5931"}', 'received'),
+  (41, 'IB-041', '面粉', 4, CURDATE() - INTERVAL 2 DAY + INTERVAL 13 HOUR, CURDATE() + INTERVAL 30 DAY + INTERVAL 13 HOUR, '{"项目":"微生物","结果":"合格","检验员":"孙质检","报告":"JY-8564"}', 'received'),
+  (42, 'IB-042', '食用油', 4, CURDATE() - INTERVAL 2 DAY + INTERVAL 8 HOUR, CURDATE() + INTERVAL 30 DAY + INTERVAL 8 HOUR, '{"项目":"微生物","结果":"合格","检验员":"孙质检","报告":"JY-6410"}', 'received'),
+  (43, 'IB-043', '香油', 4, CURDATE() - INTERVAL 2 DAY + INTERVAL 9 HOUR, CURDATE() + INTERVAL 30 DAY + INTERVAL 9 HOUR, '{"项目":"微生物","结果":"合格","检验员":"孙质检","报告":"JY-1960"}', 'received'),
+  (44, 'IB-044', '香蕉', 2, CURDATE() - INTERVAL 1 DAY + INTERVAL 10 HOUR, CURDATE() + INTERVAL 3 DAY + INTERVAL 10 HOUR, '{"项目":"农残","结果":"合格","检验员":"陈质检","报告":"JY-4611"}', 'received'),
+  (45, 'IB-045', '香醋', 4, CURDATE() - INTERVAL 2 DAY + INTERVAL 11 HOUR, CURDATE() + INTERVAL 30 DAY + INTERVAL 11 HOUR, '{"项目":"微生物","结果":"合格","检验员":"孙质检","报告":"JY-7769"}', 'received'),
+  (46, 'IB-046', '鸡胸肉', 1, CURDATE() - INTERVAL 1 DAY + INTERVAL 12 HOUR, CURDATE() + INTERVAL 5 DAY + INTERVAL 12 HOUR, '{"项目":"兽药残留","结果":"合格","检验员":"王组长","报告":"JY-1210"}', 'received'),
+  (47, 'IB-047', '鸡蛋', 1, CURDATE() - INTERVAL 1 DAY + INTERVAL 13 HOUR, CURDATE() + INTERVAL 5 DAY + INTERVAL 13 HOUR, '{"项目":"兽药残留","结果":"合格","检验员":"王组长","报告":"JY-6226"}', 'received'),
+  (48, 'IB-048', '鸭坯', 1, CURDATE() - INTERVAL 1 DAY + INTERVAL 8 HOUR, CURDATE() + INTERVAL 5 DAY + INTERVAL 8 HOUR, '{"项目":"兽药残留","结果":"合格","检验员":"王组长","报告":"JY-6446"}', 'received'),
+  (49, 'IB-049', '黄瓜', 2, CURDATE() - INTERVAL 1 DAY + INTERVAL 9 HOUR, CURDATE() + INTERVAL 3 DAY + INTERVAL 9 HOUR, '{"项目":"农残","结果":"合格","检验员":"陈质检","报告":"JY-3422"}', 'received');
 
 -- 溯源码：顾客端小程序扫码查批次/供应商/检测记录
 -- created_at 与批次同日（生产 5 分钟后贴码），同样相对化。
+-- 前四码覆盖三种检测/保质状态（新鲜/临期/已过期），是既有验收口径，保持不变；
+-- 后二十码让全部 24 道菜都能扫码，检测项目按品类（兽残/农残/水产/粮油/饮品）区分。
 INSERT IGNORE INTO trace_codes (id, code, batch_id, supplier_id, payload, created_at) VALUES
-  (1, 'TC-DEMO-0001', 1, 1, '{"dish":"青椒肉丝","检测":"合格","检验员":"王组长"}',
-     CURDATE() + INTERVAL 11 HOUR + INTERVAL 35 MINUTE);
+  (1, 'TC-DEMO-0001', 1, 1, '{"dish":"青椒肉丝","检测":"合格","检验员":"王组长","报告":"JC-2026-1120","ingredients":[{"name":"猪里脊","weight_g":150},{"name":"青椒","weight_g":100},{"name":"食用油","weight_g":20},{"name":"生抽","weight_g":8}]}',
+     CURDATE() + INTERVAL 11 HOUR + INTERVAL 35 MINUTE),
+  (2, 'TC-DEMO-0002', 2, 1, '{"dish":"宫保鸡丁","检测":"合格","检验员":"王组长","项目":"瘦肉精","ingredients":[{"name":"鸡胸肉","weight_g":150},{"name":"花生米","weight_g":40},{"name":"食用油","weight_g":20},{"name":"干辣椒","weight_g":10}]}',
+     CURDATE() - INTERVAL 1 DAY + INTERVAL 10 HOUR + INTERVAL 5 MINUTE),
+  (3, 'TC-DEMO-0003', 3, 2, '{"dish":"清炒时蔬","检测":"合格","检验员":"陈质检","项目":"农残","ingredients":[{"name":"时令青菜","weight_g":200},{"name":"蒜","weight_g":10},{"name":"食用油","weight_g":15}]}',
+     CURDATE() - INTERVAL 2 DAY + INTERVAL 9 HOUR + INTERVAL 5 MINUTE),
+  (4, 'TC-DEMO-0004', 4, 2, '{"dish":"酸辣土豆丝","检测":"合格","检验员":"陈质检","备注":"临期下架","ingredients":[{"name":"土豆","weight_g":200},{"name":"干辣椒","weight_g":8},{"name":"白醋","weight_g":15}]}',
+     CURDATE() - INTERVAL 10 DAY + INTERVAL 8 HOUR + INTERVAL 5 MINUTE),
+  (5, 'TC-DEMO-0005', 5,  1, '{"检测":"合格","ingredients":[{"name":"五花肉","weight_g":250},{"name":"冰糖","weight_g":30},{"name":"生抽","weight_g":20},{"name":"八角","weight_g":5}]}',
+     CURDATE() - INTERVAL 1 DAY + INTERVAL 8 HOUR + INTERVAL 5 MINUTE),
+  (6, 'TC-DEMO-0006', 6,  3, '{"检测":"合格","ingredients":[{"name":"草鱼","weight_g":300},{"name":"豆瓣酱","weight_g":40},{"name":"干辣椒","weight_g":20},{"name":"花椒","weight_g":10}]}',
+     CURDATE() - INTERVAL 1 DAY + INTERVAL 9 HOUR + INTERVAL 5 MINUTE),
+  (7, 'TC-DEMO-0007', 7,  1, '{"检测":"合格","ingredients":[{"name":"鸭坯","weight_g":400},{"name":"甜面酱","weight_g":30},{"name":"葱","weight_g":20}]}',
+     CURDATE() - INTERVAL 1 DAY + INTERVAL 10 HOUR + INTERVAL 5 MINUTE),
+  (8, 'TC-DEMO-0008', 8,  1, '{"检测":"合格","ingredients":[{"name":"猪里脊","weight_g":120},{"name":"鸡蛋","weight_g":100},{"name":"木耳","weight_g":30},{"name":"黄瓜","weight_g":80}]}',
+     CURDATE() - INTERVAL 1 DAY + INTERVAL 11 HOUR + INTERVAL 5 MINUTE),
+  (9, 'TC-DEMO-0009', 9,  3, '{"检测":"合格","ingredients":[{"name":"海带","weight_g":150},{"name":"蒜","weight_g":15},{"name":"香醋","weight_g":20}]}',
+     CURDATE() - INTERVAL 1 DAY + INTERVAL 12 HOUR + INTERVAL 5 MINUTE),
+  (10,'TC-DEMO-0010', 10, 2, '{"检测":"合格","ingredients":[{"name":"黄瓜","weight_g":200},{"name":"蒜","weight_g":10},{"name":"香油","weight_g":10}]}',
+     CURDATE() - INTERVAL 1 DAY + INTERVAL 13 HOUR + INTERVAL 5 MINUTE),
+  (11,'TC-DEMO-0011', 11, 1, '{"检测":"合格","ingredients":[{"name":"牛腱子","weight_g":300},{"name":"生抽","weight_g":30},{"name":"八角","weight_g":5}]}',
+     CURDATE() - INTERVAL 1 DAY + INTERVAL 8 HOUR + INTERVAL 5 MINUTE),
+  (12,'TC-DEMO-0012', 12, 4, '{"检测":"合格","ingredients":[{"name":"皮蛋","weight_g":100},{"name":"嫩豆腐","weight_g":200},{"name":"香油","weight_g":10}]}',
+     CURDATE() - INTERVAL 1 DAY + INTERVAL 9 HOUR + INTERVAL 5 MINUTE),
+  (13,'TC-DEMO-0013', 13, 2, '{"检测":"合格","ingredients":[{"name":"土豆","weight_g":120},{"name":"茄子","weight_g":120},{"name":"青椒","weight_g":80}]}',
+     CURDATE() - INTERVAL 1 DAY + INTERVAL 10 HOUR + INTERVAL 5 MINUTE),
+  (14,'TC-DEMO-0014', 14, 2, '{"检测":"合格","ingredients":[{"name":"包菜","weight_g":250},{"name":"干辣椒","weight_g":10},{"name":"蒜","weight_g":10}]}',
+     CURDATE() - INTERVAL 1 DAY + INTERVAL 11 HOUR + INTERVAL 5 MINUTE),
+  (15,'TC-DEMO-0015', 15, 2, '{"检测":"合格","ingredients":[{"name":"西红柿","weight_g":150},{"name":"鸡蛋","weight_g":100},{"name":"葱","weight_g":10}]}',
+     CURDATE() - INTERVAL 1 DAY + INTERVAL 12 HOUR + INTERVAL 5 MINUTE),
+  (16,'TC-DEMO-0016', 16, 3, '{"检测":"合格","ingredients":[{"name":"紫菜","weight_g":20},{"name":"鸡蛋","weight_g":100},{"name":"虾皮","weight_g":10}]}',
+     CURDATE() - INTERVAL 1 DAY + INTERVAL 13 HOUR + INTERVAL 5 MINUTE),
+  (17,'TC-DEMO-0017', 17, 1, '{"检测":"合格","ingredients":[{"name":"排骨","weight_g":250},{"name":"玉米","weight_g":200},{"name":"胡萝卜","weight_g":100}]}',
+     CURDATE() - INTERVAL 1 DAY + INTERVAL 8 HOUR + INTERVAL 5 MINUTE),
+  (18,'TC-DEMO-0018', 18, 4, '{"检测":"合格","ingredients":[{"name":"大米","weight_g":150}]}',
+     CURDATE() - INTERVAL 1 DAY + INTERVAL 9 HOUR + INTERVAL 5 MINUTE),
+  (19,'TC-DEMO-0019', 19, 4, '{"检测":"合格","ingredients":[{"name":"面粉","weight_g":200},{"name":"猪肉馅","weight_g":150},{"name":"白菜","weight_g":100}]}',
+     CURDATE() - INTERVAL 1 DAY + INTERVAL 10 HOUR + INTERVAL 5 MINUTE),
+  (20,'TC-DEMO-0020', 20, 4, '{"检测":"合格","ingredients":[{"name":"面条","weight_g":200},{"name":"鸡蛋","weight_g":80},{"name":"青菜","weight_g":100}]}',
+     CURDATE() - INTERVAL 1 DAY + INTERVAL 11 HOUR + INTERVAL 5 MINUTE),
+  (21,'TC-DEMO-0021', 21, 4, '{"检测":"合格","ingredients":[{"name":"红豆","weight_g":150},{"name":"冰糖","weight_g":40}]}',
+     CURDATE() - INTERVAL 1 DAY + INTERVAL 12 HOUR + INTERVAL 5 MINUTE),
+  (22,'TC-DEMO-0022', 22, 2, '{"检测":"合格","ingredients":[{"name":"香蕉","weight_g":200},{"name":"白糖","weight_g":60},{"name":"食用油","weight_g":30}]}',
+     CURDATE() - INTERVAL 1 DAY + INTERVAL 13 HOUR + INTERVAL 5 MINUTE),
+  (23,'TC-DEMO-0023', 23, 5, '{"检测":"合格","ingredients":[{"name":"橙子","weight_g":250}]}',
+     CURDATE() - INTERVAL 1 DAY + INTERVAL 8 HOUR + INTERVAL 5 MINUTE),
+  (24,'TC-DEMO-0024', 24, 5, '{"检测":"合格","ingredients":[{"name":"乌梅","weight_g":30},{"name":"山楂","weight_g":20},{"name":"冰糖","weight_g":20}]}',
+     CURDATE() - INTERVAL 1 DAY + INTERVAL 9 HOUR + INTERVAL 5 MINUTE);
 
 -- ---------------------------------------------------------------- 演示用人员当日排班
 -- 健康证过期的李四（staff_id=2）不排班，#9 拦截效果在排班层也可见
