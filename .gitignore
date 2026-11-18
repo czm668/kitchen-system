@@ -41,3 +41,6 @@ yolov8n.pt
 Thumbs.db
 desktop.ini
 /tmp*
+
+# 前端构建临时目录
+web/.esbuild-tmp/

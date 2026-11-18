@@ -1,0 +1,129 @@
+# 后厨管理系统 - 1 GiB 机型专用 MySQL 编排（A21）
+#
+# 与 docker-compose.yml 的差异：**只改了内存相关参数**，架构完全一致
+# （api + mysql + backup 三容器，MySQL 8.4，19 份迁移自动建 51 张表）。
+# 毕设写"生产级 MySQL"时，这份就是可直接引用的部署口径。
+#
+# ⚠️ 启动前必须先建 swap（见 deploy/setup-swap.sh）。MySQL 首次初始化
+#    要分配 buffer pool 并跑完 19 份 DDL，是内存峰值最高的时刻；
+#    1 GiB 无 swap 时容易在 init 阶段被 OOM Killer 杀掉，表现为容器
+#    反复 Restarting 且 mysqld 日志停在 "Initializing database"。
+#    —— 先 `sudo bash deploy/setup-swap.sh 2G`，再 up。
+#
+# 用法：
+#   cd deploy
+#   cp .env.example .env              # 改 4 个 CHANGE_ME
+#   docker compose -f docker-compose.1g.yml config
+#   docker compose -f docker-compose.1g.yml up -d --build
+#   docker stats --no-stream          # 核对真实占用
+#
+# 预计常驻：mysql ~260–320 MB / api ~45 MB / backup ~4 MB / dockerd ~80 MB
+#          + Ubuntu ~200 MB ≈ 600–650 MB，1 GiB 有约 300 MB 余量。
+
+services:
+  api:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+      # 构建期的 pip 源。默认清华源（开发机可用）；云服务器上清华源会对
+      # 部分云厂商出口 IP 回 403（实测阿里云杭州：HTTP/2 403），此时在 .env 里
+      # 设 PIP_INDEX_URL=https://mirrors.aliyun.com/pypi/simple/ 即可，无需改 Dockerfile。
+      args:
+        PIP_INDEX_URL: "${PIP_INDEX_URL:-https://pypi.tuna.tsinghua.edu.cn/simple}"
+    container_name: kitchen-api
+    # 发布地址可配：
+    #   本地/有 nginx 的机器（默认）→ 127.0.0.1:8848，只回环，公网摸不到
+    #   阿里云直连演示（无域名无语义 TLS）→ .env 里设
+    #       KITCHEN_BIND_ADDR=0.0.0.0
+    #       KITCHEN_HTTP_PORT=80
+    #   这样 80 直接由容器接管，不必在宿主机装 nginx，8848 也不对外发布。
+    ports:
+      - "${KITCHEN_BIND_ADDR:-127.0.0.1}:${KITCHEN_HTTP_PORT:-8848}:8848"
+    environment:
+      KITCHEN_ADMIN_PASSWORD: "${KITCHEN_ADMIN_PASSWORD:?请设置管理口令}"
+      KITCHEN_API_SECRET: "${KITCHEN_API_SECRET:?请设置 API 签名密钥}"
+      KITCHEN_DB_URL: "mysql://kitchen:${MYSQL_PASSWORD}@mysql:3306/kitchen"
+      # 客诉 AI：`.env` 里没配 key 就是空串，自动走离线规则，不会因缺变量
+      # 启动失败；配了 key 即切 live（DeepSeek，OpenAI 兼容）。
+      KITCHEN_LLM_API_KEY: "${KITCHEN_LLM_API_KEY:-}"
+      KITCHEN_LLM_BASE_URL: "${KITCHEN_LLM_BASE_URL:-https://api.deepseek.com/v1}"
+      KITCHEN_LLM_MODEL: "${KITCHEN_LLM_MODEL:-deepseek-chat}"
+      # 云服务器上没有环境代理，必须 false：否则到 DeepSeek 的请求被代理掐断，
+      # 表现为客诉 AI 静默降级成离线规则，日志里没有任何报错。
+      KITCHEN_LLM_USE_PROXY: "${KITCHEN_LLM_USE_PROXY:-false}"
+    volumes:
+      - api_var:/app/var
+      - api_backups:/app/backups
+    depends_on:
+      mysql:
+        condition: service_healthy
+    restart: unless-stopped
+    mem_limit: 256m          # 实际约 45 MB，留足峰值余量
+
+  mysql:
+    image: mysql:8.4
+    container_name: kitchen-mysql
+    environment:
+      MYSQL_DATABASE: kitchen
+      MYSQL_USER: kitchen
+      MYSQL_PASSWORD: "${MYSQL_PASSWORD:?请设置 MySQL 口令}"
+      MYSQL_ROOT_PASSWORD: "${MYSQL_ROOT_PASSWORD:?请设置 root 口令}"
+      TZ: Asia/Shanghai      # 让容器内时间与备份侧车的 02:00 对齐
+    volumes:
+      - mysql_data:/var/lib/mysql
+      # 19 份迁移 / 51 表：首启自动执行（001→019）；仅卷为空时执行
+      - ../migrations:/docker-entrypoint-initdb.d:ro
+    # —— 1 GiB 内存调优（这是本文件的核心）——
+    # 默认配置空库就要 350–450 MB，大头是 buffer pool 128M 与
+    # performance_schema ~100M。下面把两者压下来，其余按连接数收窄。
+    # 注意：没有动 innodb_flush_log_at_trx_commit（保持默认 1），
+    # 事务持久性不变——"生产级"这个说法才站得住，代价是写入略慢。
+    command: >
+      --character-set-server=utf8mb4
+      --collation-server=utf8mb4_unicode_ci
+      --innodb-buffer-pool-size=64M
+      --innodb-buffer-pool-instances=1
+      --innodb-log-buffer-size=8M
+      --performance-schema=OFF
+      --mysqlx=OFF
+      --skip-name-resolve
+      --max-connections=40
+      --table-open-cache=200
+      --sort-buffer-size=512K
+      --join-buffer-size=512K
+      --read-buffer-size=128K
+      --read-rnd-buffer-size=256K
+      --tmp-table-size=16M
+      --max-heap-table-size=16M
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-ukitchen",
+             "-p${MYSQL_PASSWORD}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      # 首次初始化要跑完 19 份迁移，给它 3 分钟宽限，别提前判死
+      start_period: 180s
+    restart: unless-stopped
+    mem_limit: 512m          # 实际约 260–320 MB；超了是容器内 OOM，不拖垮整机
+
+  backup:
+    image: mysql:8.4
+    container_name: kitchen-backup
+    environment:
+      MYSQL_PASSWORD: "${MYSQL_PASSWORD:?请设置 MySQL 口令}"
+      TZ: Asia/Shanghai
+    depends_on:
+      mysql:
+        condition: service_healthy
+    volumes:
+      - api_var:/source/var:ro
+      - api_backups:/dest
+      - ./backup-sidecar.sh:/backup-sidecar.sh:ro
+    entrypoint: ["sh", "/backup-sidecar.sh"]
+    restart: unless-stopped
+    mem_limit: 64m           # 只跑 sh 循环 + mysqldump，很轻
+
+volumes:
+  api_var:
+  api_backups:
+  mysql_data:

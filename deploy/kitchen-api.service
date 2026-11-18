@@ -1,4 +1,4 @@
-# 后厨管理系统 - systemd 服务单元（A4，Linux 裸机部署路径）
+# 后厨管理系统 - systemd 服务单元（A4 / A20 阿里云）
 # 安装：
 #   sudo cp deploy/kitchen-api.service /etc/systemd/system/
 #   sudo systemctl daemon-reload && sudo systemctl enable --now kitchen-api
@@ -6,6 +6,18 @@
 #
 # 说明：ExecStart 里的 /opt/kitchen 是部署根；python 用 venv（零第三方
 # 依赖，venv 只是为了与系统 Python 隔离，pyproject.toml 可直接 pip install .）
+#
+# ⚠️ A20 修正（原模板有三个上线会出事的问题，已改）：
+#   1) 原模板写死 `Environment=KITCHEN_ADMIN_PASSWORD=__SET_IN_ENVFILE__`，
+#      而 EnvironmentFile 用了 `-` 前缀（文件不存在也不报错）——一旦忘了建
+#      /etc/kitchen/kitchen.env，管理口令就真的变成这个字符串。公网机器上
+#      这是可被直接猜到的默认口令。现改为：只从 EnvironmentFile 读，且文件
+#      缺失时服务直接启动失败（去掉 `-` 前缀），宁可起不来也不裸奔。
+#   2) 原模板没有 --trust-proxy。挂在 nginx 后面时后端看到的来源 IP 全是
+#      127.0.0.1，登录防爆破的锁定键被所有人共用：任意访客输错 5 次，
+#      全体管理员一起被锁 60 秒。现补上（仅限 nginx 反代场景）。
+#   3) 原模板没写 --static，靠默认值 web/dist 相对 WorkingDirectory 猜。
+#      前端没构建/没上传时只会静默 404。现显式指定，路径错了一眼能看出来。
 
 [Unit]
 Description=Kitchen Management API (backend)
@@ -17,20 +29,31 @@ Type=simple
 User=kitchen
 Group=kitchen
 WorkingDirectory=/opt/kitchen
-Environment=KITCHEN_ADMIN_PASSWORD=__SET_IN_ENVFILE__
-Environment=KITCHEN_API_SECRET=__SET_IN_ENVFILE__
-# 环境文件优先（chmod 600，root 可读）：/etc/kitchen/kitchen.env
-EnvironmentFile=-/etc/kitchen/kitchen.env
+
+# 必须存在：/etc/kitchen/kitchen.env（chmod 600，属主 root）
+# 必填项：KITCHEN_ADMIN_PASSWORD、KITCHEN_API_SECRET
+# 选填项：KITCHEN_LLM_*（客诉 AI 走在线模型时才需要）
+# 注意：llm.py 也会读工程根的 /opt/kitchen/.env，真环境变量优先于文件。
+EnvironmentFile=/etc/kitchen/kitchen.env
+# 源码布局是 src/kitchen/...，`-m kitchen.api.server` 找不到包时靠这条定位。
+# （不依赖 pip install：核心零第三方依赖，venv 只做解释器隔离）
+Environment=PYTHONPATH=/opt/kitchen/src
+
 ExecStart=/opt/kitchen/.venv/bin/python -m kitchen.api.server \
     --host 127.0.0.1 --port 8848 \
     --var /opt/kitchen/var \
     --db /opt/kitchen/var/runtime.db \
+    --static /opt/kitchen/web/dist \
+    --trust-proxy \
     --schedule
 Restart=on-failure
 RestartSec=5
 # 进程防护：连续失败退避，不无限重启打爆日志
 StartLimitIntervalSec=300
 StartLimitBurst=5
+
+# SSE 长连接会占住 fd，默认 1024 在多人同时看板时不够
+LimitNOFILE=65536
 
 # 安全加固（systemd 沙箱）
 NoNewPrivileges=true

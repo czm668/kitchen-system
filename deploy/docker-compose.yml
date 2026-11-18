@@ -1,6 +1,6 @@
 # 后厨管理系统 - Docker Compose（A4）
 # 用法：docker compose up -d ；日志：docker compose logs -f api
-# MySQL 部署路径：migrations/001-017 在 mysql 服务首次启动时自动执行
+# MySQL 部署路径：migrations/001-019 在 mysql 服务首次启动时自动执行
 # （./migrations 挂到 /docker-entrypoint-initdb.d，MySQL 官方镜像首启自动跑 .sql）。
 #
 # ⚠️ 上生产前必须改的三个值（.env 或直接改这里）：
@@ -11,6 +11,10 @@ services:
     build:
       context: ..
       dockerfile: deploy/Dockerfile
+      # 构建期 pip 源，默认清华源；云服务器上若被回 403，在 .env 里设
+      # PIP_INDEX_URL=https://mirrors.aliyun.com/pypi/simple/ 即可
+      args:
+        PIP_INDEX_URL: "${PIP_INDEX_URL:-https://pypi.tuna.tsinghua.edu.cn/simple}"
     container_name: kitchen-api
     ports:
       - "8848:8848"
@@ -24,6 +28,12 @@ services:
       #    优先级高于 Dockerfile CMD 里的 --db（SQLite 兜底）；
       #    mysql:// 一旦设置，连不上明确抛错，不静默退回文件库。
       KITCHEN_DB_URL: "mysql://kitchen:${MYSQL_PASSWORD}@mysql:3306/kitchen"
+      # —— 客诉 AI（可选）：.env 里配了 key 就会切 live，没配则走离线规则 ——
+      #    之前这几行是注释状态，等于 .env 填了 key 也传不进容器，AI 静默降级。
+      KITCHEN_LLM_API_KEY: "${KITCHEN_LLM_API_KEY:-}"
+      KITCHEN_LLM_BASE_URL: "${KITCHEN_LLM_BASE_URL:-https://api.deepseek.com/v1}"
+      KITCHEN_LLM_MODEL: "${KITCHEN_LLM_MODEL:-deepseek-chat}"
+      KITCHEN_LLM_USE_PROXY: "${KITCHEN_LLM_USE_PROXY:-false}"
     volumes:
       - api_var:/app/var          # 队列/审计/运行时库持久化
       - api_backups:/app/backups  # 备份输出
@@ -42,7 +52,7 @@ services:
       MYSQL_ROOT_PASSWORD: "${MYSQL_ROOT_PASSWORD:?请设置 root 口令}"
     volumes:
       - mysql_data:/var/lib/mysql
-      # 17 份迁移 / 50 表 / 71 索引：首启自动执行（按文件名序 001→017）
+      # 19 份迁移 / 51 表：首启自动执行（按文件名序 001→019）
       # 仅在 mysql_data 卷为空时执行；有旧数据时见 deploy/README.md §四第 3 条
       - ../migrations:/docker-entrypoint-initdb.d:ro
     command: >

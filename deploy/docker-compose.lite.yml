@@ -1,0 +1,56 @@
+# 后厨管理系统 - 精简 Compose（A21，1 GiB 内存机型专用）
+#
+# 与 docker-compose.yml 的区别：**只跑 api，不跑 MySQL**，存储走容器内
+# SQLite（挂 api_var 卷持久化）。原因见下：
+#   mysql:8.4 常驻 400–600 MB，加 Docker 守护进程（~80 MB）、Ubuntu 系统
+#   （~150 MB）、api（~60 MB），1 GiB 机型几乎没有余量，并发几个请求就会
+#   触发 OOM Killer，表现是容器反复 Restarting，排查成本很高。
+#   只跑 api 时总占用约 250–300 MB，1 GiB 跑得很稳。
+#
+# 想用 MySQL：把套餐升到 2 GiB 以上，改用同目录 docker-compose.yml。
+# 注意轻量应用服务器只支持升配、不支持降配。
+#
+# 用法：
+#   cd deploy
+#   cp .env.example .env      # 填 KITCHEN_ADMIN_PASSWORD / KITCHEN_API_SECRET
+#                             # （MySQL 那两个变量本文件用不到，留着无害）
+#   docker compose -f docker-compose.lite.yml config   # 先校验
+#   docker compose -f docker-compose.lite.yml up -d --build
+#
+# 反向代理：宿主机 nginx 反代到 127.0.0.1:8848（见 deploy/nginx.conf）。
+# 端口只绑回环，不直接对公网开放 8848。
+
+services:
+  api:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    container_name: kitchen-api
+    # 只映射到宿主机回环口，由 nginx 终结 TLS 后转发过来
+    ports:
+      - "127.0.0.1:8848:8848"
+    environment:
+      KITCHEN_ADMIN_PASSWORD: "${KITCHEN_ADMIN_PASSWORD:?请设置管理口令}"
+      KITCHEN_API_SECRET: "${KITCHEN_API_SECRET:?请设置 API 签名密钥}"
+      # 关键：**不要**设置 KITCHEN_DB_URL。不注入即走 Dockerfile CMD 里的
+      # --db /app/var/runtime.db（SQLite），这正是 1 GiB 机型要的路径。
+      # —— 客诉 AI（可选）：要用在线模型时把 key 加进来 ——
+      # KITCHEN_LLM_API_KEY: "${KITCHEN_LLM_API_KEY}"
+      # KITCHEN_LLM_BASE_URL: "https://api.deepseek.com/v1"
+      # KITCHEN_LLM_MODEL: "deepseek-chat"
+      # KITCHEN_LLM_USE_PROXY: "false"
+    volumes:
+      - api_var:/app/var          # SQLite 库 + 队列 + 审计
+      - api_backups:/app/backups  # 备份产物
+    restart: unless-stopped
+    # 硬上限：容器内 OOM 而不是拖垮整机（cgroup 限制生效于容器，不影响宿主机）
+    mem_limit: 384m
+    # Dockerfile 已定义 HEALTHCHECK（/api/health），此处不重复
+
+  # 备份不用侧车容器（少一份常驻进程），改为宿主机 cron 调容器内的备份脚本：
+  #   0 2 * * * docker exec kitchen-api python tools/backup.py \
+  #               --db /app/var/runtime.db --keep 14
+
+volumes:
+  api_var:
+  api_backups:

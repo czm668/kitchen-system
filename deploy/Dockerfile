@@ -13,19 +13,29 @@ FROM python:3.11-slim AS base
 RUN useradd --create-home --shell /usr/sbin/nologin kitchen
 WORKDIR /app
 
-# A18：运行期唯一第三方依赖是 MySQL 驱动（纯 Python，无编译）。
-# 只有设置 KITCHEN_DB_URL 才会 import；SQLite / 裸机演示路径仍是零依赖标准库。
+# A18：运行期第三方依赖只有 MySQL 驱动链路；SQLite / 裸机演示路径仍是零依赖标准库。
+#   pymysql      纯 Python 驱动，只有设置 KITCHEN_DB_URL 才会 import
+#   cryptography MySQL 8.4 默认 caching_sha2_password，pymysql 首次认证
+#                （服务端密码缓存未预热、且连接未走 TLS）要对服务端 RSA
+#                公钥做 sha256 加密，缺这个包会抛
+#                "RuntimeError: 'cryptography' package is required"，
+#                表现为 api 容器启动即退、RestartCount 一路涨到 MySQL
+#                侧 healthcheck 把密码缓存打热之后才侥幸起来。
+#                2026-11-18 实测复现：重启 7 次后才连上。必须装，不能省。
+# 都走 manylinux wheel，无编译，不影响 slim 镜像的可构建性。
 # 固定版本保证可复现；国内源只是加速，换环境可用 --build-arg PIP_INDEX_URL 覆盖。
 ARG PIP_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple
 RUN pip install --no-cache-dir --disable-pip-version-check \
-        --index-url "${PIP_INDEX_URL}" "pymysql==1.1.1"
+        --index-url "${PIP_INDEX_URL}" \
+        "pymysql==1.1.1" \
+        "cryptography==43.0.3"
 
 # 包在 /app/src 下，`python -m kitchen.api.server` 的默认 sys.path[0] 是
 # WORKDIR(/app)，不加这一行容器启动会 No module named kitchen。
 # （裸机 Windows 走仓库根 pytest 配置，不需要；容器是标准 CPython，PYTHONPATH 生效）
 ENV PYTHONPATH=/app/src
 
-# 代码层：核心业务仍是纯标准库；唯一第三方依赖是上面的 pymysql，
+# 代码层：核心业务仍是纯标准库；第三方只有上面的 pymysql 与 cryptography，
 # 且只在 KITCHEN_DB_URL 存在时才被 import。
 # 单独 COPY pyproject 是为了利用 Docker 层缓存——代码改动不触发重装。
 COPY pyproject.toml ./
@@ -34,6 +44,10 @@ COPY tools/ ./tools/
 COPY fixtures/ ./fixtures/
 COPY migrations/ ./migrations/
 COPY scenarios/ ./scenarios/
+# 前端构建产物：由 api 的 --static 同源托管，单端口 8848 既是 API 也是站点。
+# 前提是本地已 `cd web && npm run build`；目录不存在时 COPY 会直接失败，
+# 这是故意的——比镜像构建成功但线上只有 404 好排查得多。
+COPY web/dist/ ./web/dist/
 
 # 运行期目录：落盘（队列/审计）与运行时库挂卷持久化
 RUN mkdir -p /app/var /app/backups && chown -R kitchen:kitchen /app
@@ -58,4 +72,5 @@ CMD ["python", "-m", "kitchen.api.server", \
      "--host", "0.0.0.0", "--port", "8848", \
      "--var", "/app/var", \
      "--db", "/app/var/runtime.db", \
+     "--static", "/app/web/dist", \
      "--schedule"]

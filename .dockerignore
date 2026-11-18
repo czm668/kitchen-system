@@ -28,8 +28,15 @@ __pycache__/
 *.db
 *.sqlite3
 
-# —— 前端依赖与构建产物（镜像内不托管 web/） ——
-web/
+# —— 前端：只带构建产物进镜像 ——
+# 2026-11-18 修正：原来整目录 `web/` 排除，镜像里没有任何页面；server 的
+# `static if static.is_dir() else None` 会静默降级成「仅 API」，上云访问 IP
+# 只看到 404（而 /api/health 正常，极难联想到是前端没进镜像）。
+# 现在只排除开发期目录，web/dist 随镜像打包，由 --static 同源托管。
+# 前提：构建镜像前先在本地跑过 `cd web && npm run build`。
+web/node_modules/
+web/.vite/
+web/src/
 miniapp/
 
 # —— 测试与本地工具产物（Dockerfile 未 COPY） ——
