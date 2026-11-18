@@ -247,8 +247,9 @@ def test_留样与消毒快照落库(tmp_path):
 
     svc = DisinfectionService(repo, clock=lambda: TS)
     svc.recorder = rec
-    svc.start(batch_id=None, session_uid="DI-TEST", now=TS)
-    svc.feed(110.0, session_uid="DI-TEST", now=TS)
+    session = svc.start(batch_id=None, session_uid="DI-TEST", now=TS)
+    # feed 按 record_id 定位会话；session_uid 只在 start 时用来定号
+    svc.feed(110.0, record_id=session.record.id, now=TS)
     row = rec.conn.query(
         "SELECT session_uid, state, cumulative_sec FROM disinfection_records "
         "WHERE session_uid = 'DI-TEST'")[0]
@@ -274,6 +275,15 @@ def test_写失败只计数不抛_主路径不受影响(tmp_path):
     rec = _rec(tmp_path)
     repo, _ = _repos()
     rec.sync_baseline(repo, MemoryStaffRepository.from_seed())
+
+    # 基线物化走 insert_ignore 直写，不计 business_writes；先用一次正常业务写
+    # 确认计数器在工作，否则「失败不增加」这条断言等于没验。
+    sample = RetentionSample(
+        id=2, dish_batch_id=repo.batch_ids()[0], weight_g=120.0,
+        sampled_at=TS, destroy_due_at=TS, state="stored")
+    assert rec.upsert_retention_sample(sample) is True
+    assert rec.business_writes == 1
+
     rec.conn.close()  # 人为制造库失败
     orders = OrderService(repo, clock=lambda: TS,
                           sink=lambda o, e: (rec.persist_order(o),
@@ -282,7 +292,7 @@ def test_写失败只计数不抛_主路径不受影响(tmp_path):
     order = orders.place_order(items=[(dish.id, 1)])  # 不因落库失败而抛
     assert order.state.value == "created"
     assert rec.write_failures >= 2  # 订单快照 + 事件各失败一次
-    assert rec.business_writes > 0  # 基线物化已成功计入
+    assert rec.business_writes == 1  # 失败只增 write_failures，不动成功计数
     rec.close()  # 幂等
 
 
