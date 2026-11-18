@@ -3,6 +3,7 @@
 [![ci](https://github.com/czm668/kitchen-system/actions/workflows/ci.yml/badge.svg)](https://github.com/czm668/kitchen-system/actions/workflows/ci.yml)
 [![python](https://img.shields.io/badge/python-3.11-3776ab)](pyproject.toml)
 [![tests](https://img.shields.io/badge/tests-1458-brightgreen)](tests)
+[![license](https://img.shields.io/badge/license-non--commercial-red)](LICENSE)
 
 > 定稿题目《基于 ESP32 的后厨智能调度与食安合规管理系统的设计与实现》
 > 从零建立的独立工程 · 2026-11-12 起
@@ -73,6 +74,12 @@ flowchart TB
 | 前端 | Vue 3 管理端 12 视图；小程序 9 页 |
 | 部署 | Docker Compose 三容器，阿里云 1 GiB 实测共占 206 MB |
 
+## 文档
+
+完整设计文档见 [`docs/`](docs/README.md)：01 总体架构 · 02 硬件与 GPIO · 03 数据库 ·
+04 功能规格与联动阈值 · 05 接口与通信契约 · 06 模拟前端实施方案 · 07 管理端 ·
+08 TFT 终端 · 09 小程序 · 10 顾客画像与 AI 客服 · 11 经营账本 · 12 食安合规凭证。
+
 ## 快速开始
 
 ```bash
@@ -102,6 +109,11 @@ python -m kitchen.api.server --static web/dist
 - **视觉模型未训练**：明火/离人链路是通的，演示时用脚本注入检测结果，不声称有训练好的模型。
 - **小程序未发正式版**：试用实例开不了备案服务号，缺备案域名 + HTTPS；开发模式与真机预览可用。
 - **支付未接入**：客诉补偿只生成凭证与审批记录，不对接支付渠道。
+
+## 许可
+
+仅供个人学习与技术交流，**不授权商业使用**；也请不要把整体或实质部分拿去当毕业设计、
+课程设计或竞赛作品提交。完整条款见 [`LICENSE`](LICENSE)。
 
 ## 工程缘起（开发笔记）
 
