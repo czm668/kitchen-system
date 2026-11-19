@@ -184,12 +184,33 @@
         "diagnosis": "59 个 train phone 框 / 21164 图（0.28%）类信号过弱，微调无法学会一个几乎缺席的类；phone 输出在本 val 上无任何 TP（P=R=AP=0），说明模型基本不再输出 phone 预测，而非定位偏移",
         "next": "出路在数据侧：补更多 phone 标注（含厨房场景实拍），或用更大教师/更高分辨率专项训练 phone 检测头；当前 kitchen 补集管线 tools/vision_kitchen_merge.py 已就绪"
       },
+      "v3_finetune_eval": {
+        "date": "2026-11-19",
+        "run": "runs/vision/kitchen-v3-uniform",
+        "protocol": "并入厨房补集后的 6 类 val 口径（3528 图：uniform 54 框/42 图、phone 22 框/21 图，person/hat/mask/cigarette 原口径不变）",
+        "release_criteria": "原 4 类 mAP50 均值>=0.62 且 uniform AP50>=0.30 且 phone AP50>=0.30（训练前预声明，三条全过才替换权重）",
+        "per_class_AP50": {
+          "person": 0.87137,
+          "hat": 0.95722,
+          "mask": 0.89827,
+          "uniform": 0.69597,
+          "cigarette": 0.98201,
+          "phone": 0.01053
+        },
+        "all_mAP50": 0.7359,
+        "all_mAP50_95": 0.49265,
+        "orig4_mean_AP50": 0.92722,
+        "verdict": "phone AP50=0.0105 未达 0.30，三条判据未全过；v1 权重保留为生产权重，v3 best.pt 留档不发布",
+        "diagnosis": "uniform 路线①（补厨房场景图像）被证明有效：226 个 train 框让 uniform 从零到 AP50=0.696，且原 4 类无回退（均值 0.927）；phone 60 个 train 框（v2 的 59 + 厨房 1）在 v2/v3 两次独立实验中均学不动（AP 0.0 / 0.01），证据一致：约 0.3% 出现率的类对微调不可学",
+        "note": "v1 与 v3 的 phone 能力实际都≈0（v1 训练时 phone 类零标注），发布 v3 不损失 phone 能力；但发布判据为训练前预声明，事后放宽即事后挑数——严格执行协议，v3 留档。若要发布 uniform 能力，正路是补足 phone 数据后做 v4（判据重声明），或与答辩语境讨论 phone 的定位",
+        "evidence": "var/kitchen_merge/v3_eval.json（评测脚本 /d/.local/tmp/labelscan/eval_v3.py 可复现）"
+      },
       "full_retrain_cost": "单轮约 6.5 分钟(imgsz416/batch16/21164 图)，80 轮 8+ 小时；更大预训练权重 GitHub/HF 均被代理拦截，无法下载。",
       "root_cause": "提升天花板在数据：uniform/phone 零标注、cigarette 仅 679 张。换模型/调参变不出缺失类别的 AP。"
     },
     "reproduce": "用训练环境 python 运行 tools/vision_repro.py baseline（非系统默认 python，后默认为 torch CPU 版）；tta 为对照。详见脚本 docstring。",
     "label_gap": {
-      "note": "2026-11-19 phone 验证/训练集已补齐（COCO cell-phone 教师 + 人工逐框目检裁决，工具 tools/vision_label_patch.py 三步可复现：scan → sheet → commit）。uniform 仍为 0——数据集为工地 PPE 图像（Roboflow 导出，hh-* 前缀 + cig-* 烟头特写），画面中不存在工服/围裙实例，无法诚实补标；若要把 uniform 变实，需厨房场景图像或人工决定'反光背心↦uniform'语义映射并重新标注。",
+      "note": "2026-11-19 phone 验证/训练集已补齐（COCO cell-phone 教师 + 人工逐框目检裁决，工具 tools/vision_label_patch.py 三步可复现：scan → sheet → commit）。uniform 已随厨房补集（tools/vision_kitchen_merge.py，Mixkit Free 后厨实拍）从 0 补到 train 226 + val 54 框；phone 全项目仅 60 train 框，v2/v3 两次微调实验证明学不动（AP 0.0/0.01），标签缺口收敛为 phone 一项。",
       "phone_census": {
         "method": "yolov8n.pt(COCO 80 类) imgsz=640 conf>=0.30 普查 + 人工对照图逐框裁决",
         "train": {
