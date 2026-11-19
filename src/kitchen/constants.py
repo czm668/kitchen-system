@@ -20,7 +20,7 @@ from pathlib import Path
 from typing import Any
 
 __all__ = ["constants", "voice_table", "demo_durations", "mqtt_root",
-           "DEFAULTS_PATH"]
+           "vision_thresholds", "DEFAULTS_PATH"]
 
 #: 仓库根（本文件在 src/kitchen/ 下，parents[2] 即仓库根）
 DEFAULTS_PATH = Path(__file__).resolve().parents[2] / "fixtures" / "kitchen_constants.json"
@@ -67,6 +67,15 @@ def constants() -> dict[str, Any]:
         if "{device_id}" not in tpl:
             _fail(f"mqtt.topics.{key} 缺少 {{device_id}} 占位：{tpl}")
 
+    # ④ 视觉阈值台账：五个子表齐全（具体值与代码默认值的一致性由
+    #    tests/test_vision_thresholds.py 断言，这里只保证结构完整）
+    vision = data.get("vision")
+    if not isinstance(vision, dict):
+        _fail("vision 段缺失")
+    for section in ("model", "analysis", "violation", "absence", "pipeline"):
+        if not isinstance(vision.get(section), dict) or not vision[section]:
+            _fail(f"vision.{section} 为空")
+
     return data
 
 
@@ -80,3 +89,9 @@ def demo_durations() -> list[dict[str, Any]]:
 
 def mqtt_root() -> str:
     return constants()["mqtt"]["root"]
+
+
+def vision_thresholds() -> dict[str, dict[str, Any]]:
+    """视觉阈值登记台账。运行时真值仍是各 Policy dataclass 默认值；
+    本函数供文档/测试读取，二者一致性由 tests/test_vision_thresholds.py 守卫。"""
+    return constants()["vision"]

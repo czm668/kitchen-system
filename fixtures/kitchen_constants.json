@@ -32,5 +32,41 @@
       "events": "{root}/{device_id}/events",
       "actions": "{root}/{device_id}/actions"
     }
+  },
+
+  "vision": {
+    "_readme": "视觉判定阈值的登记台账（审查报告 §3 隐式常量单一来源）。这里不驱动运行时——各 Policy dataclass 的默认值仍是运行时真值；tests/test_vision_thresholds.py 断言本表与代码默认值逐字一致，谁改了一边都会被 CI 拦下。阈值语义见 03_设计文档/04_功能规格与联动阈值.md #16。",
+    "model": {
+      "conf": 0.25,
+      "imgsz": 416,
+      "iou": 0.7,
+      "note": "conf/imgsz 是 detector.YoloDetector 默认；iou 是训练侧 NMS 阈值（var/train.log，ultralytics 内部，代码层无 NMS）。"
+    },
+    "analysis": {
+      "min_conf": 0.35,
+      "person_conf": 0.40,
+      "behavior_conf": 0.50,
+      "head_ratio": 0.45,
+      "mask_ratio": 0.60,
+      "torso_top": 0.20,
+      "torso_bottom": 0.95,
+      "attach_overlap": 0.50
+    },
+    "violation": {
+      "min_frames": 3,
+      "min_sec": 1.5,
+      "cooldown_sec": 120.0,
+      "clear_misses": 3,
+      "evidence_window": 5,
+      "active_grace_sec": 10.0
+    },
+    "absence": {
+      "absence_sec": 12.0,
+      "return_sec": 2.0,
+      "cooldown_sec": 300.0
+    },
+    "pipeline": {
+      "blind_frames": 20
+    }
   }
 }

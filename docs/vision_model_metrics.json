@@ -1,0 +1,77 @@
+{
+  "_readme": "视觉模型质量的单一数据源。数值来自 var/train.log 中 best.pt 的最终验证（L460-464、L650-656），由 tools/vision_model_report.py 读取并生成人读报告。改数字必须同步改 train.log 对应的真实训练结果，禁止手抄一个更好看的数。审查报告 §5.1 缺陷#15（uniform/phone 验证缺口）以本文件为唯一口径出口。",
+
+  "provenance": {
+    "log": "var/train.log",
+    "anchor_overall": "3484       9893      0.904      0.877      0.927      0.643",
+    "anchor_per_class": "person        510       1326      0.801      0.845      0.888       0.59",
+    "anchor_arrays": "nt_per_class: array([1326, 8147,  331,    0,   89,    0])",
+    "anchor_note": "用内容锚点而非行号溯源：日志混用 \\r/\\n，行号在不同读取方式下会从 460 漂到 76319；内容锚点不受影响。tests/test_vision_model_report.py 校验锚点仍在日志里。",
+    "weight_file": "weights/kitchen.pt",
+    "weight_bytes": 6503396,
+    "weight_sha256_note": "权重二进制较大，不在此存哈希；用 tools/paper_figures.py 的口径标注。此处只锁指标数字。"
+  },
+
+  "training": {
+    "framework": "Ultralytics 8.4.203",
+    "base_model": "yolov8n.pt (pretrained=True)",
+    "python": "3.11.9",
+    "torch": "2.6.0+cu124",
+    "gpu": "NVIDIA GeForce RTX 4060 Laptop GPU 8GiB",
+    "epochs": 80,
+    "imgsz": 416,
+    "iou": 0.7,
+    "seed": 2026,
+    "batch": 16,
+    "optimizer": "MuSGD(lr=0.01, momentum=0.9)",
+    "train_images": 21164,
+    "val_images": 3484,
+    "duration_hours": 3.652,
+    "fused_layers": 73,
+    "parameters": 3133922,
+    "gflops": 8.6
+  },
+
+  "overall": {
+    "precision": 0.904,
+    "recall": 0.877,
+    "map50": 0.927,
+    "map50_95": 0.643,
+    "fitness": 0.64269,
+    "val_images": 3484,
+    "val_instances": 9893
+  },
+
+  "per_class": [
+    {"id": 0, "name": "person",     "val_images": 510,  "instances": 1326, "precision": 0.801, "recall": 0.845, "map50": 0.888, "map50_95": 0.590, "validated": true},
+    {"id": 1, "name": "hat",        "val_images": 2955, "instances": 8147, "precision": 0.942, "recall": 0.911, "map50": 0.957, "map50_95": 0.597, "validated": true},
+    {"id": 2, "name": "mask",       "val_images": 75,   "instances": 331,  "precision": 0.958, "recall": 0.829, "map50": 0.906, "map50_95": 0.611, "validated": true},
+    {"id": 3, "name": "uniform",    "val_images": 0,    "instances": 0,    "precision": null,  "recall": null,  "map50": null,  "map50_95": null,  "validated": false},
+    {"id": 4, "name": "cigarette",  "val_images": 64,   "instances": 89,   "precision": 0.917, "recall": 0.921, "map50": 0.957, "map50_95": 0.773, "validated": true},
+    {"id": 5, "name": "phone",      "val_images": 0,    "instances": 0,    "precision": null,  "recall": null,  "map50": null,  "map50_95": null,  "validated": false}
+  ],
+
+  "ap_class_index": [0, 1, 2, 4],
+  "nt_per_class": [1326, 8147, 331, 0, 89, 0],
+  "nt_per_image": [510, 2955, 75, 0, 64, 0],
+
+  "speed_ms": {
+    "preprocess": 0.1,
+    "inference": 0.6,
+    "loss": 0.0,
+    "postprocess": 0.7,
+    "note": "best.pt 在 RTX 4060 Laptop 上的单图速度；真机 CPU/边缘设备会显著不同，不作答辩性能承诺。"
+  },
+
+  "boundary": {
+    "validated_classes": 4,
+    "unvalidated_classes": ["uniform", "phone"],
+    "reason": "val 集这两类真值框为 0（nt_per_class[3]=0、nt_per_class[5]=0），ap_class_index 只含 4 类，无法计算 AP。根因：uniform 无可用的公开标注集、phone 只吃了 COCO 预训练底子但自有 val 集未采标注——与 tools/paper_figures.py 的诚实标注一致；未列入的类别不补 0（补 0 会假装'测过且很差'，比'没测'更不诚实）。属数据集拼装缺口，不是代码缺陷。",
+    "presentation_rule": "答辩/论文主动说明 4 类有验证集、uniform 与 phone 无独立验证样本；不得声称 6 类全部通过验证，也不得靠加类别掩盖。",
+    "improvement_path": [
+      "补采 uniform/phone 的 val 真值框（建议各 ≥50 张独立样本，含擦汗/锅铲/端盘等易混负样本）",
+      "重跑 tools/vision_train.py 生成的训练命令（GPU 环境），更新 var/train.log 与本文件",
+      "在 tools/paper_figures.py 中把两类从'无独立验证样本'改为实测 AP，并保留历史日志可追溯"
+    ]
+  }
+}

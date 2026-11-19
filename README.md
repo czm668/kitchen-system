@@ -2,7 +2,7 @@
 
 [![ci](https://github.com/czm668/kitchen-system/actions/workflows/ci.yml/badge.svg)](https://github.com/czm668/kitchen-system/actions/workflows/ci.yml)
 [![python](https://img.shields.io/badge/python-3.11-3776ab)](pyproject.toml)
-[![tests](https://img.shields.io/badge/tests-1494-brightgreen)](tests)
+[![tests](https://img.shields.io/badge/tests-1545-brightgreen)](tests)
 [![license](https://img.shields.io/badge/license-non--commercial-red)](LICENSE)
 
 > 定稿题目《基于 ESP32 的后厨智能调度与食安合规管理系统的设计与实现》
@@ -70,7 +70,7 @@ flowchart TB
 | 领域代码 | 103 个模块 / 31,683 行 Python（运行时零第三方依赖） |
 | 数据 | 51 张表 · 19 个版本化迁移 · 4 张核心状态机 |
 | 接口 | 93 个 HTTP 接口（主路由 65 + 扩展 28） |
-| 测试 | 1494 项 pytest，覆盖判定边界、状态机、存储双后端、接口契约 |
+| 测试 | 1545 项 pytest，覆盖判定边界、状态机、存储双后端、接口契约 |
 | 前端 | Vue 3 管理端 12 视图；小程序 9 页 |
 | 部署 | Docker Compose 三容器，阿里云 1 GiB 实测共占 206 MB |
 
@@ -89,7 +89,7 @@ flowchart TB
 `tools/demos/` 下全是离线演示脚本，**不是服务入口**——别从那里挑一个跑就以为服务起来了。
 
 ```bash
-# 1) 单测（1494 项，纯标准库，不装任何依赖）
+# 1) 单测（1545 项，纯标准库，不装任何依赖）
 python -m pytest -q
 
 # 2) 本地 CI：R5 时钟守卫 + 数字守卫 + 单测 + 迁移 + 前端 + 小程序（6 关）
@@ -141,9 +141,14 @@ TFT 终端、管理端 dev 模式）见下方《快速开始》原文。
 
 - **硬件未整机装配**：驱动、三通道互锁、失联降级都有单测与仿真回放，但没有一块焊好的板子。
 - **视觉模型部分验证**：`weights/kitchen.pt` 为 6 类轻量模型（person / hat / mask / uniform /
-  cigarette / phone），其中 4 类有验证集，**uniform 与 phone 无独立验证样本**（见 `var/train.log`
-  的 `nt_per_class` 与 `tools/paper_figures.py` 的诚实标注）。明火/离人判定链路是通的，
+  cigarette / phone），best.pt 验证 **mAP50-95=0.643、mAP50=0.927**，其中 **4 类有验证集，
+  uniform 与 phone 无独立验证样本**（`ap_class_index=[0,1,2,4]`）。明火/离人判定链路是通的，
   演示时用脚本注入检测结果，**不声称已通过厨房场景实测**。
+  指标的**唯一数据源**是 [`docs/vision_model_metrics.json`](docs/vision_model_metrics.json)
+  （内容锚点溯源到 `var/train.log`，不靠脆弱行号）；
+  `python tools/vision_model_report.py` 打印可辩护报告、`--check` 校验自洽，
+  `tests/test_vision_model_report.py` 钉死"不许给无验证样本的类编造 AP"
+  （含 overall mAP = validated 各类均值的强等式校验）。
 - **云部署边界**：MySQL 8.4 单实例，1 GiB 机型参数调优，已验证跨重启持久化与每日备份；
   不是高可用生产集群。在线 demo 为 HTTP + 裸 IP，无域名、无 HTTPS。
 - **小程序未发正式版**：试用实例开不了备案服务号，缺备案域名 + HTTPS；开发模式与真机预览可用。
@@ -261,7 +266,7 @@ kitchen-system/                     ← 毕设项目根（文档 + 代码分开�
 │       │   ├── vision_dataset.yaml        视觉数据集配置（names 顺序 = 模型 class id）
 │       │   └── seed_kitchen.sql           种子数据（工位/菜品配方SOP/员工工牌/监测点阈值）
 │       ├── firmware/esp32cam/         ESP32-CAM MJPEG 推流（草图，未编译；引脚表+供电规范）
-│       ├── tests/                     1494 条单测（含 MQTT 链路 6 条、调度器 9 条、prod 安全 4 条）
+│       ├── tests/                     1545 条单测（含 MQTT 链路 6 条、调度器 9 条、prod 安全 4 条）
 │       │   └── fixtures/qr_golden.json    二维码基准哈希（满容量用例由 segno 逐掩码比对确认）
 │       ├── tools/
 │       │   ├── legacy.py                  旧目录素材取用器（list / fetch / verify / check）
@@ -277,6 +282,8 @@ kitchen-system/                     ← 毕设项目根（文档 + 代码分开�
 │       │   ├── compliance_demo.py         A4 合规闭环（留样→48h销毁→消毒复消→溯源标签→派单改派）
 │       │   ├── vision_demo.py             A5 视觉闭环（去抖→切电→证据链→复核→离岗转派→接#3）
 │       │   ├── vision_train.py            数据集类别顺序校验 + 训练指令生成（不训练）
+│       │   ├── vision_model_report.py     YOLO 指标单一数据源 → 可辩护报告（--check 自洽）
+│       │   ├── gen_vision_scenarios.py    生成 6 个视觉时序剧本夹具（去抖/遮挡/离岗）
 │       │   ├── cam_check.py               摄像头节点自检（帧间隔/大小/时间戳/头尾完整）
 │       │   ├── resilience_demo.py         A6 异常兜底演练（断网/掉电/传感器坏/三端降级 10 段）
 │       │   ├── web_check.py               A7 管理端验收自检（构建产物/8 页链路/21 写接口/29 项）
@@ -320,7 +327,7 @@ web/
 PY="python"     # 本机便携版：D:/liulan1/毕设/.local/python311/python.exe
 cd "02_项目代码/kitchen"
 
-# 跑全部单测（1494 条）
+# 跑全部单测（1545 条）
 # MQTT 真链路演示（A2）：python tools/demos/mqtt_demo.py --amqtt
 "$PY" -m pytest -q
 
@@ -471,7 +478,7 @@ cd web && npm run build          # → web/dist（约 745KB / gzip 258KB）
 | 供应链与溯源（A4-08） | ✅ 溯源码→批次/供应商/检测一屏 + 出库门禁 + 自研二维码标签（`process/trace.py` / `qr.py`） |
 | 派单资质联调（A4-09） | ✅ `StaffMatcher` + 不符自动改派 + 上灶复校（`process/dispatch.py`） |
 | 视觉帧源（A5-01） | ✅ MJPEG 按 FFD8/FFD9 切帧 + 时间戳单调化 + 看门狗（`vision/stream.py`） |
-| 视觉判定（A5-02） | ✅ 框→人员状态 + 跨帧去抖 + 正向证据优先；模型训练待硬件（`vision/postprocess.py`） |
+| 视觉判定（A5-02） | ✅ 框→人员状态 + 跨帧去抖 + 正向证据优先（`vision/postprocess.py`）；6 类模型权重已入库，指标见 `docs/vision_model_metrics.json`（4 类有验证集） |
 | 证据链（A5-03） | ✅ 多图 + sha256 + 元数据，可验签（`vision/evidence.py`） |
 | #16 违规处置（A5-04） | ✅ 行为类切电/着装类只语音 + 双通道复核 + 最短 10s（`vision/disposal.py`） |
 | #11 离岗转派（A5-05） | ✅ 离岗 12s → 未开火转派；已开火只报组长接手（`vision/absence.py`） |

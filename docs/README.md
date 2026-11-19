@@ -26,6 +26,7 @@
 | [`12_食安合规凭证扩展设计.md`](12_食安合规凭证扩展设计.md) | 把 17 条主线串成一条可举证的证据链 | `src/kitchen/compliance/` |
 | [`13_多融合AI中枢设计.md`](13_多融合AI中枢设计.md) | 七个 AI 场景共用 provider + 护栏 + 审计，新增场景只写 AdvSpec | `src/kitchen/ai/` |
 | [`功能证据矩阵.md`](功能证据矩阵.md) / [`requirements.json`](requirements.json) | 17 条功能的证据类型、AI 融合槽位、规模数字单一数据源 | 人读表 + 机器源 |
+| [`vision_model_metrics.json`](vision_model_metrics.json) | YOLO 模型指标（各类别 AP / mAP / 验证集缺口）唯一数据源，内容锚点溯源到 `var/train.log` | 答辩 + 论文图表；`tools/vision_model_report.py` 生成报告 |
 | [`术语与边界.md`](术语与边界.md) | "state 五义"、两条时间轴、AI 护栏、交付口径的用词约定 | 新人 + 答辩 |
 
 > 10–13 是**扩展演示模块**，不计入申报方案的 17 条主线功能；各自独立成域，
