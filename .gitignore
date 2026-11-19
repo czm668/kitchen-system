@@ -30,6 +30,10 @@ runs/
 
 # 预训练底座权重（Ultralytics 官方模型，首次运行自动下载）
 yolov8n.pt
+yolov8s.pt
+
+# 视觉复现脚本的临时字体缓存（Windows 系统字体目录被拒时生成）
+kitchen-mplconfig/
 
 # 本机安装依赖时的 pip 临时目录残留（不是工程内容）
 /pip-*/

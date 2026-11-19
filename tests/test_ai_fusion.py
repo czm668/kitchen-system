@@ -2,11 +2,11 @@
 """A28 多融合 AI 中枢回归。
 
 钉死五件事：
-1. 三个新场景的离线规则产出**能被 validate_payload 严格接受**的形状；
+1. 四个新场景的离线规则产出**能被 validate_payload 严格接受**的形状；
 2. 在线失败时按 spec.rule 降级，不返回 500、留 degraded_reason；
 3. AiService 只出建议——结果里没有 approve/decision/amount，且 advice_only=True；
-4. overview 只读聚合七个场景、不重复调用模型、不写业务表；
-5. 三个建议端点走权限、过滤隐私字段。
+4. overview 只读聚合八个场景、不重复调用模型、不写业务表；
+5. 建议端点走权限、过滤隐私字段。
 """
 from __future__ import annotations
 
@@ -19,6 +19,7 @@ from kitchen.ai.specs import (
     rule_anomaly_explain,
     rule_compliance_qa,
     rule_dispatch_hint,
+    rule_violation_explain,
 )
 from kitchen.guest.llm import (
     LLMUnavailable,
@@ -65,6 +66,9 @@ class EchoProvider:
                           "items": [{"label": "出库门禁", "state": "fail",
                                      "passed": 0, "checked": 1, "gaps": ["消毒未达标"]}]},
      "compliance_qa"),
+    (rule_violation_explain, {"kind": "smoking", "station_id": 3,
+                              "evidence": True, "power_cut": True},
+     "violation_explain"),
 ])
 def test_offline_rules_are_strictly_valid(rule, facts, spec):
     raw = rule(facts)
@@ -118,14 +122,14 @@ def test_unknown_scenario_rejected():
 
 
 # ---------------------------------------------------------------- overview 只读聚合
-def test_overview_aggregates_seven_scenarios_without_new_calls(tmp_path):
+def test_overview_aggregates_eight_scenarios_without_new_calls(tmp_path):
     # 用 BrokenProvider：若 overview 触发任何在线调用会直接抛 LLMUnavailable，
     # 测试随即失败——这是对"只读不重跑模型"最强的证明。
     state = make_state(tmp_path)
     state.ai = AiService(state, provider=BrokenProvider())
     state.ai.advise("anomaly_explain", {"kind": "燃气"})  # 走降级，留一条审计
     ov = state.ai.overview()
-    assert ov["totals"]["scenario_count"] == 7
+    assert ov["totals"]["scenario_count"] == 8
     names = [s["scenario"] for s in ov["scenarios"]]
     assert set(SCENARIOS).issubset(set(names))
     assert {"profile", "support", "finance_daily", "compliance_daily"}.issubset(set(names))
@@ -141,7 +145,7 @@ def test_routes_require_permission_and_filter_privacy(tmp_path):
 
     # 面板：观察员可读（ai.read = 全员）
     ov = data_of(server, "GET", "/api/ai/overview", session=viewer)
-    assert ov["totals"]["scenario_count"] == 7
+    assert ov["totals"]["scenario_count"] == 8
 
     # 建议：观察员被拒
     status, _ = server.router.call(
@@ -163,3 +167,35 @@ def test_routes_require_permission_and_filter_privacy(tmp_path):
     runs = data_of(server, "GET", "/api/ai/runs", session=manager)
     assert runs["total"] >= 1
     assert runs["runs"][-1]["scenario"] == "anomaly_explain"
+
+
+# ---------------------------------------------------------------- 视觉违规归因（第 8 场景）
+def test_violation_rule_maps_kind_and_never_changes_ticket():
+    """英文 kind → 中文白名单分类；只出建议，不碰工单/复核/供电。"""
+    for kind, expected in (("no_hat", "未戴厨师帽"), ("smoking", "工位吸烟"),
+                           ("phone", "工位玩手机"), ("unknown_kind", "其他")):
+        raw = rule_violation_explain({"kind": kind, "station_id": 3,
+                                      "evidence": True, "power_cut": True})
+        assert raw["category"] == expected
+        assert raw["need_human"] is True
+        assert "ST3" in raw["summary"]
+    out = AiService(None, provider=BrokenProvider()).advise(
+        "violation_explain", {"kind": "smoking", "station_id": 2, "power_cut": True})
+    assert out["advice_only"] is True
+    assert out["slot_boundary"] == "不改工单/不批准复核/不恢复供电"
+    assert out["prompt_version"] == "violation-explain-v1"
+    for forbidden in ("approve", "decision", "amount", "restore_power", "close_ticket"):
+        assert forbidden not in out
+
+
+def test_violation_route_works_and_filters_privacy(tmp_path):
+    server = make_server(tmp_path)
+    lead = force_session("lead", "lead")
+    adv = data_of(server, "POST", "/api/ai/advise/violation", session=lead,
+                  kind="no_hat", station_id=5, evidence=True, power_cut=False,
+                  openid="SENSITIVE-OPENID", phone="13800000000")
+    assert adv["advice_only"] is True
+    assert "未戴厨师帽" in adv["summary"]
+    assert "ST5" in adv["summary"]
+    assert "SENSITIVE-OPENID" not in str(adv)
+    assert "13800000000" not in str(adv)

@@ -21,11 +21,12 @@ const overview = ref({ provider: {}, scenarios: [], totals: {}, guardrails: {}, 
 const runs = ref([])
 const busy = ref('')
 
-// 三个建议场景的表单：只收少量结构化字段，隐私字段前端根本不提供。
+// 四个建议场景的表单：只收少量结构化字段，隐私字段前端根本不提供。
 const forms = ref({
   anomaly: { kind: '燃气', reading: '', threshold: '', detail: '', advice: '' },
   dispatch: { queue: '', idle_stations: '', free_staff: '' },
   compliance: { question: '' },
+  violation: { kind: 'no_hat', station_id: '', evidence: true, power_cut: false },
 })
 const result = ref(null)
 const activeTab = ref('anomaly')
@@ -39,7 +40,16 @@ const ADVICE_PATHS = {
   anomaly: '/api/ai/advise/anomaly',
   dispatch: '/api/ai/advise/dispatch',
   compliance: '/api/ai/advise/compliance',
+  violation: '/api/ai/advise/violation',
 }
+
+const VIOLATION_KINDS = [
+  { value: 'no_hat', label: '未戴厨师帽' },
+  { value: 'no_mask', label: '未戴口罩' },
+  { value: 'no_uniform', label: '未穿工服' },
+  { value: 'smoking', label: '工位吸烟' },
+  { value: 'phone', label: '工位玩手机' },
+]
 
 async function load() {
   loading.value = true
@@ -78,6 +88,11 @@ function buildPayload(kind) {
       free_staff: splitList(f.free_staff),
       staff_pool_enabled: true,
     }
+  }
+  if (kind === 'violation') {
+    const p = { kind: f.kind, evidence: !!f.evidence, power_cut: !!f.power_cut }
+    if (f.station_id !== '') p.station_id = Number(f.station_id)
+    return p
   }
   return { question: f.question, overall: '', items: [] }
 }
@@ -172,6 +187,8 @@ onMounted(load)
                     @click="activeTab='dispatch'; result=null">派单建议</button>
             <button type="button" :class="{ active: activeTab === 'compliance' }"
                     @click="activeTab='compliance'; result=null">合规问答</button>
+            <button type="button" :class="{ active: activeTab === 'violation' }"
+                    @click="activeTab='violation'; result=null">违规归因</button>
           </div>
           <div class="advice-forms">
             <div v-if="activeTab === 'anomaly'" class="advice-form">
@@ -200,13 +217,36 @@ onMounted(load)
               <button class="btn" type="button" :disabled="busy === 'dispatch'"
                       @click="requestAdvice('dispatch')">获取派单建议</button>
             </div>
-            <div v-else class="advice-form">
+            <div v-else-if="activeTab === 'compliance'" class="advice-form">
               <h3>食安合规问答</h3>
               <div class="fields">
                 <label class="wide">问题 <input v-model="forms.compliance.question" placeholder="如：为什么这个批次不能出库？" /></label>
               </div>
               <button class="btn" type="button" :disabled="busy === 'compliance'"
                       @click="requestAdvice('compliance')">获取合规解释</button>
+            </div>
+            <div v-else class="advice-form">
+              <h3>视觉违规归因（YOLO 检出 + LLM 解释）</h3>
+              <div class="fields">
+                <label>违规类型
+                  <select v-model="forms.violation.kind">
+                    <option v-for="v in VIOLATION_KINDS" :key="v.value" :value="v.value">{{ v.label }}</option>
+                  </select>
+                </label>
+                <label>工位号 <input v-model="forms.violation.station_id" placeholder="如 3" /></label>
+                <label>证据已抓拍
+                  <select v-model="forms.violation.evidence">
+                    <option :value="true">是</option><option :value="false">否</option>
+                  </select>
+                </label>
+                <label>已断电
+                  <select v-model="forms.violation.power_cut">
+                    <option :value="false">否</option><option :value="true">是</option>
+                  </select>
+                </label>
+              </div>
+              <button class="btn" type="button" :disabled="busy === 'violation'"
+                      @click="requestAdvice('violation')">获取违规归因</button>
             </div>
           </div>
         </template>

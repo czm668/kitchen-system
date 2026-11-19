@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""三个多融合场景的规格与确定性离线规则。
+"""四个多融合场景的规格与确定性离线规则。
 
 每个 spec 都是 `guest/llm.py::AdvSpec` 的实例，注入到 `run_guarded` 后：
 在线层用自定义 system 提示词、白名单用本场景分类、失败降级用本场景 rule。
@@ -18,6 +18,7 @@ from ..guest.llm import AdvSpec
 __all__ = [
     "SCENARIOS", "SCENARIO_TITLES", "AI_SLOTS",
     "rule_anomaly_explain", "rule_dispatch_hint", "rule_compliance_qa",
+    "rule_violation_explain",
 ]
 
 # ---------------------------------------------------------------- 白名单
@@ -27,6 +28,8 @@ ANOMALY_CATEGORIES = ("燃气", "排烟积热", "冷链超温", "明火离人", 
 DISPATCH_CATEGORIES = ("尽快派单", "维持排队", "建议改派", "需人工确认")
 #: 合规问答分类：对应食安检查表的六项，答非所问会被护栏拦下降级。
 QA_CATEGORIES = ("晨检准入", "健康证", "留样", "消毒", "出库门禁", "工单闭环", "其他")
+#: 视觉违规归因的分类：对齐 #16 五类违规 + 其他，模型不得自造违规类型。
+VIOLATION_CATEGORIES = ("未戴厨师帽", "未戴口罩", "未穿工服", "工位吸烟", "工位玩手机", "其他")
 
 # ---------------------------------------------------------------- 提示词
 # 共用尾部：六条底线写进每个场景的 system，模型再怎么发挥也越不过去。
@@ -54,6 +57,13 @@ SYSTEM_COMPLIANCE_QA = (
     "你是食安合规问答助手。基于当日检查表的确定性结论回答值班人员的问题，"
     "解释「为什么这项达标/不达标、为什么不能出库」。你不改门禁、不改检查结论、"
     "不替代检验——所有结论来自 checklist()，你只把已有事实翻译成人话。" + _GUARD_TAIL
+)
+SYSTEM_VIOLATION = (
+    "你是后厨视觉违规复核助手。视觉模型（YOLO）已检出一起违规并生成工单，"
+    "你基于工单里的违规类型、工位号、抓拍证据是否齐全、是否已断电这些**既有事实**，"
+    "帮组长解释「这起违规为什么被判定、复核时要重点看什么」。"
+    "违规判定已由视觉模型和确定性规则完成，你只做解释与复核提示——"
+    "绝不改工单状态、绝不批准复核、绝不恢复供电、绝不删除证据。" + _GUARD_TAIL
 )
 
 # ---------------------------------------------------------------- 离线规则
@@ -144,6 +154,39 @@ def rule_compliance_qa(facts: Mapping[str, Any]) -> dict[str, Any]:
                  sentiment="upset" if (hit and str(hit.get("state")) == "fail") else "calm")
 
 
+def rule_violation_explain(facts: Mapping[str, Any]) -> dict[str, Any]:
+    """离线视觉违规归因：把工单里已判定的违规翻成人话 + 复核提示。
+
+    只读 facts 的既有事实（违规类型/工位/证据/断电），不推断、不改工单。
+    断网也能出结论——这是答辩现场的默认路径。
+    """
+    # 违规类型可以是中文标签或英文 kind，统一映射到白名单中文分类
+    label_map = {
+        "no_hat": "未戴厨师帽", "no_mask": "未戴口罩", "no_uniform": "未穿工服",
+        "smoking": "工位吸烟", "phone": "工位玩手机",
+        "未戴厨师帽": "未戴厨师帽", "未戴口罩": "未戴口罩", "未穿工服": "未穿工服",
+        "工位吸烟": "工位吸烟", "工位玩手机": "工位玩手机",
+    }
+    raw_kind = str(facts.get("kind") or "")
+    category = label_map.get(raw_kind, "其他")
+    station = facts.get("station_id")
+    evidence = bool(facts.get("evidence"))
+    power_cut = bool(facts.get("power_cut"))
+
+    parts = [f"视觉模型判为「{category}」"]
+    if station is not None:
+        parts.append(f"工位 ST{station}")
+    parts.append("证据包已抓拍" if evidence else "证据包未齐，请现场补拍")
+    parts.append("设备已按规则断电" if power_cut else "该违规不触发断电（着装类/规则未判切电）")
+    summary = "；".join(parts) + "。判定来自视觉模型与确定性规则，AI 仅解释与提示复核。"
+    checks = ["核对抓拍帧与违规类型是否一致", "确认工位归属无误"]
+    if power_cut:
+        checks.append("断电为规则自动处置，恢复须组长双通道复核")
+    reply = "建议组长复核：" + "、".join(checks) + "；本建议不改写工单、不批准复核、不恢复供电。"
+    return _pack(category, summary, reply,
+                 need_human=True, confidence=0.9 if category != "其他" else 0.5)
+
+
 # ---------------------------------------------------------------- 场景表
 SCENARIOS: dict[str, AdvSpec] = {
     "anomaly_explain": AdvSpec(
@@ -158,6 +201,10 @@ SCENARIOS: dict[str, AdvSpec] = {
         scenario="compliance_qa", prompt_version="compliance-qa-v1",
         system_prompt=SYSTEM_COMPLIANCE_QA, categories=QA_CATEGORIES,
         rule=rule_compliance_qa),
+    "violation_explain": AdvSpec(
+        scenario="violation_explain", prompt_version="violation-explain-v1",
+        system_prompt=SYSTEM_VIOLATION, categories=VIOLATION_CATEGORIES,
+        rule=rule_violation_explain),
 }
 
 #: 展示用标题 + AI 融合槽位口径（与 docs/功能证据矩阵.md 对齐）。
@@ -165,6 +212,7 @@ SCENARIO_TITLES: dict[str, str] = {
     "anomaly_explain": "安全异常归因解释",
     "dispatch_hint": "智能派单优先级建议",
     "compliance_qa": "食安合规问答",
+    "violation_explain": "视觉违规归因解释",
     "profile": "顾客画像（既有）",
     "support": "AI 客服受理（既有）",
     "finance_daily": "经营日报点评（既有）",
@@ -176,6 +224,7 @@ AI_SLOTS: dict[str, str] = {
     "anomaly_explain": "不关阀、不改告警状态",
     "dispatch_hint": "不改订单与工位状态",
     "compliance_qa": "不改门禁与检查结论",
+    "violation_explain": "不改工单/不批准复核/不恢复供电",
     "profile": "不改会员等级与标签落库",
     "support": "不改退款审批结论",
     "finance_daily": "不改账目数字",

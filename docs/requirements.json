@@ -5,11 +5,11 @@
   "status": "待老师确认（功能基本不删减，学校要求多融合 AI）",
   "scale": {
     "main_routes": 65,
-    "extension_routes": 33,
-    "total_endpoints": 98,
+    "extension_routes": 34,
+    "total_endpoints": 99,
     "migrations": 19,
     "tables": 51,
-    "pytest_cases": 1545,
+    "pytest_cases": 1548,
     "cloud_selfcheck": "10/10",
     "miniapp_readonly": "16/16",
     "miniapp_write": "24/24"
@@ -18,7 +18,7 @@
     "guest_api": 14,
     "finance_api": 9,
     "compliance_api": 5,
-    "ai_api": 5
+    "ai_api": 6
   },
   "ai": {
     "provider": "src/kitchen/guest/llm.py::make_provider（单一实例共享，无 key 走 RuleProvider）",
@@ -30,9 +30,9 @@
       "不喂隐私（openid/手机号/卡号/顾客 key）",
       "prompt_version + model + mode 可复现"
     ],
-    "new_scenarios": ["anomaly_explain", "dispatch_hint", "compliance_qa"],
+    "new_scenarios": ["anomaly_explain", "dispatch_hint", "compliance_qa", "violation_explain"],
     "legacy_scenarios": ["profile", "support", "finance_daily", "compliance_daily"],
-    "total_scenarios": 7,
+    "total_scenarios": 8,
     "central_module": "src/kitchen/ai/",
     "audit_table": "004_llm_reports.sql::llm_runs（复用，不另造表）"
   },
@@ -59,7 +59,7 @@
     {"id": 14, "name": "留样称重", "status": "待确认", "evidence": ["仿真", "单测"], "ai_slot": "留样图像核验", "ai_scenario": "vision/detector.py"},
     {"id": 15, "name": "消毒曲线与复消闭环", "status": "待确认", "evidence": ["仿真", "单测"], "ai_slot": "曲线异常归因", "ai_scenario": "compliance_qa"},
     {"id": "15b", "name": "出库门禁", "status": "待确认", "evidence": ["仿真", "单测"], "ai_slot": "合规问答", "ai_scenario": "compliance_qa"},
-    {"id": 16, "name": "着装与行为违规", "status": "待确认", "evidence": ["仿真", "部分验证"], "ai_slot": "视觉模型主战场", "ai_scenario": "vision/detector.py"},
+    {"id": 16, "name": "着装与行为违规", "status": "待确认", "evidence": ["仿真", "部分验证"], "ai_slot": "视觉模型检出 + LLM 违规归因解释", "ai_scenario": "violation_explain"},
     {"id": 17, "name": "断网本地闭环与补传", "status": "待确认", "evidence": ["仿真", "单测"], "ai_slot": "离线规则层", "ai_scenario": "RuleProvider"}
   ]
 }

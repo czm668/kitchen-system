@@ -12,17 +12,17 @@
 - pytest 用例数 = `--collect-only` 的收集数
 - AI 场景 = `src/kitchen/ai/specs.py::SCENARIOS` 的键 + 既有四场景
 
-**第二层：数据源 vs 文档宣称**（README 只允许按数据源的口径写）
-- "N 条主路由 / N 条 JSON 路由" / "合计 N 个 HTTP 接口"
+**第二层：数据源 vs 文档宣称**（README / 矩阵都只允许按数据源的口径写）
+- "N 条主路由 / N 条 JSON 路由" / "N 个 HTTP 接口" / "扩展 N 条"
 - "数据库迁移 001–NNN"
-- "共 N 个 pytest 用例" / "N 条用例"
+- "共 N 个 pytest 用例" / "矩阵规模表 N"
 - "七/7 个 AI 场景" / "N 个 AI 场景"
 
 不检查"取用自旧工程 001–013"这类历史说明（口径不同）。
 
 用法：
     python tools/consistency_check.py        # 只检查，不改文件
-    python tools/consistency_check.py --fix  # 把 README 数字改对（仍需人工看 diff）
+    python tools/consistency_check.py --fix  # 把 README / 矩阵数字改对（仍需人工看 diff）
 退出码：0 一致 / 1 漂移。挂进 tools/ci.py 第一关。零三方依赖（纯标准库 json）。
 """
 from __future__ import annotations
@@ -87,8 +87,9 @@ def _ai_scenario_count() -> int:
                       text, re.DOTALL)
     if not block:
         return 0
-    new = len(re.findall(r'"(anomaly_explain|dispatch_hint|compliance_qa)"\s*:',
-                         block.group(1)))
+    # 数 SCENARIOS 字典顶层的所有键（`'key': AdvSpec(`），不再硬编码场景名——
+    # 否则每加一个场景守卫就漏一个，得手工同步两处（R4 数字单一源的本意）。
+    new = len(re.findall(r'^\s+"(\w+)":\s*AdvSpec\(', block.group(1), re.MULTILINE))
     service_text = (ROOT / "src" / "kitchen" / "ai" / "service.py").read_text(encoding="utf-8")
     legacy_block = re.search(r"_LEGACY_SCENARIOS\s*=\s*\((.*?)\)", service_text, re.DOTALL)
     legacy = (len(re.findall(r'"\w+"', legacy_block.group(1)))
@@ -135,18 +136,33 @@ def check_source_vs_code(src: dict[str, Any]) -> list[str]:
     return issues
 
 
-def check_docs_vs_source(src: dict[str, Any], readme: str) -> list[str]:
-    """第二层：README 里的数字宣称与数据源比对。"""
+def check_docs_vs_source(src: dict[str, Any], readme: str, matrix: str) -> list[str]:
+    """第二层：README / 功能证据矩阵里的数字宣称与数据源比对。"""
     scale = src["scale"]
+    ai_total = src.get("ai", {}).get("total_scenarios")
     issues: list[str] = []
     for token, actual in (("JSON 路由", scale["main_routes"]),
                           ("主路由", scale["main_routes"])):
         for m in re.finditer(rf"(\d+)\s*条\s*{token}", readme):
             if int(m.group(1)) != actual:
                 issues.append(f"README {token}：写 {m.group(1)}，应为 {actual}")
-    for m in re.finditer(r"合计\s*(\d+)\s*个\s*HTTP\s*接口", readme):
-        if int(m.group(1)) != scale["total_endpoints"]:
-            issues.append(f"README 总接口：写 {m.group(1)}，应为 {scale['total_endpoints']}")
+    for pat in (r"HTTP API：(\d+)\s*个接口",
+                r"(\d+)\s*个\s*HTTP\s*接口",
+                r"合计\s*(\d+)\s*个\s*HTTP\s*接口"):
+        for m in re.finditer(pat, readme):
+            if int(m.group(1)) != scale["total_endpoints"]:
+                issues.append(f"README 总接口：写 {m.group(1)}，"
+                              f"应为 {scale['total_endpoints']}")
+    for pat in (r"主路由\s*(\d+)\s*\+\s*扩展\s*(\d+)",
+                r"(\d+)\s*条主路由\s*\+\s*(\d+)\s*条扩展路由",
+                r"(\d+)\s*条主路由（扩展\s*(\d+)\s*条在"):
+        for m in re.finditer(pat, readme):
+            if int(m.group(1)) != scale["main_routes"]:
+                issues.append(f"README 主路由：写 {m.group(1)}，"
+                              f"应为 {scale['main_routes']}")
+            if int(m.group(2)) != scale["extension_routes"]:
+                issues.append(f"README 扩展路由：写 {m.group(2)}，"
+                              f"应为 {scale['extension_routes']}")
     for m in re.finditer(r"数据库迁移\s*001[–-](\d+)", readme):
         if int(m.group(1)) != scale["migrations"]:
             issues.append(f"README 迁移编号：写 001–{m.group(1)}，"
@@ -166,14 +182,44 @@ def check_docs_vs_source(src: dict[str, Any], readme: str) -> list[str]:
             if int(m.group(2)) != scale["pytest_cases"]:
                 issues.append(f"README pytest 数字：写 {m.group(2)}，"
                               f"应为 {scale['pytest_cases']}（{m.group(0)[:44]}）")
+
+    matrix_rows = (
+        (r"\|\s*主路由 / 扩展路由 / 总接口\s*\|\s*(\d+)\s*/\s*(\d+)\s*/\s*(\d+)",
+         ("矩阵主路由", "矩阵扩展路由", "矩阵总接口"),
+         (scale["main_routes"], scale["extension_routes"], scale["total_endpoints"])),
+        (r"\|\s*迁移 / 表\s*\|\s*(\d+)\s*/\s*(\d+)",
+         ("矩阵迁移", "矩阵表"),
+         (scale["migrations"], scale["tables"])),
+        (r"\|\s*AI 场景[^|]*\|\s*(\d+)", ("矩阵 AI 场景",),
+         (ai_total,)),
+        (r"\|\s*pytest 用例\s*\|\s*(\d+)", ("矩阵 pytest 用例",),
+         (scale["pytest_cases"],)),
+    )
+    for pat, labels, expected in matrix_rows:
+        m = re.search(pat, matrix)
+        if not m:
+            continue
+        for idx, (label, exp) in enumerate(zip(labels, expected), start=1):
+            if exp is not None and int(m.group(idx)) != exp:
+                issues.append(f"{label}：写 {m.group(idx)}，应为 {exp}")
     return issues
 
 
 def apply_fix(readme: str, src: dict[str, Any]) -> str:
     scale = src["scale"]
-    text = re.sub(r"(\d+)(条\s*(?:JSON\s*)?主路由)", rf"{scale['main_routes']}\2", readme)
-    text = re.sub(r"(合计\s*)\d+(\s*个\s*HTTP\s*接口)",
-                  rf"\g<1>{scale['total_endpoints']}\2", text)
+    main = scale["main_routes"]
+    ext = scale["extension_routes"]
+    total = scale["total_endpoints"]
+    text = re.sub(r"(\d+)(条\s*(?:JSON\s*)?主路由)", rf"{main}\2", readme)
+    text = re.sub(r"(HTTP API：)\d+(\s*个接口)", rf"\g<1>{total}\2", text)
+    text = re.sub(r"\b\d+(\s*个\s*HTTP\s*接口)", rf"{total}\1", text)
+    text = re.sub(r"(合计\s*)\d+(\s*个\s*HTTP\s*接口)", rf"\g<1>{total}\2", text)
+    text = re.sub(r"(主路由\s*)\d+(\s*\+\s*扩展\s*)\d+",
+                  rf"\g<1>{main}\g<2>{ext}", text)
+    text = re.sub(r"(\d+)(条主路由\s*\+\s*)\d+(条扩展路由)",
+                  rf"{main}\g<2>{ext}\3", text)
+    text = re.sub(r"(\d+\s*条主路由（扩展\s*)\d+(\s*条在)",
+                  rf"{main} 条主路由（扩展 {ext}\2", text)
     text = re.sub(r"(数据库迁移\s*001[–-])\d+",
                   rf"\g<1>{scale['migrations']:03d}", text)
     text = re.sub(r"(共\s*)\d+(\s*个\s*pytest\s*用例)",
@@ -189,13 +235,34 @@ def apply_fix(readme: str, src: dict[str, Any]) -> str:
     return text
 
 
+def apply_fix_matrix(matrix: str, src: dict[str, Any]) -> str:
+    """按数据源修正功能证据矩阵的规模表；只改数字，不改措辞。"""
+    scale = src["scale"]
+    main = scale["main_routes"]
+    ext = scale["extension_routes"]
+    total = scale["total_endpoints"]
+    text = re.sub(
+        r"(\|\s*主路由 / 扩展路由 / 总接口\s*\|\s*)\d+\s*/\s*\d+\s*/\s*\d+",
+        rf"\g<1>{main} / {ext} / {total}", matrix)
+    text = re.sub(r"(\|\s*迁移 / 表\s*\|\s*)\d+\s*/\s*\d+",
+                  rf"\g<1>{scale['migrations']} / {scale['tables']}", text)
+    ai_total = src.get("ai", {}).get("total_scenarios")
+    if ai_total is not None:
+        text = re.sub(r"(\|\s*AI 场景[^|]*\|\s*)\d+", rf"\g<1>{ai_total}", text)
+    text = re.sub(r"(\|\s*pytest 用例\s*\|\s*)\d+",
+                  rf"\g<1>{scale['pytest_cases']}", text)
+    return text
+
+
 def check(fix: bool = False) -> int:
     src = _load_source()
     readme_path = ROOT / "README.md"
+    matrix_path = ROOT / "docs" / "功能证据矩阵.md"
     readme = readme_path.read_text(encoding="utf-8")
+    matrix = matrix_path.read_text(encoding="utf-8")
 
     source_issues = check_source_vs_code(src)
-    doc_issues = check_docs_vs_source(src, readme)
+    doc_issues = check_docs_vs_source(src, readme, matrix)
 
     if not source_issues and not doc_issues:
         s = src["scale"]
@@ -205,14 +272,15 @@ def check(fix: bool = False) -> int:
         return 0
 
     if source_issues:
-        print("数据源与代码漂移（先改 docs/requirements.json，再跑 --fix 改 README）：\n"
+        print("数据源与代码漂移（先改 docs/requirements.json，再跑 --fix 改 README / 矩阵）：\n"
               + "\n".join("  - " + i for i in source_issues))
     if fix and not source_issues:
         readme_path.write_text(apply_fix(readme, src), encoding="utf-8")
-        print(f"已按数据源修正 README 的 {len(doc_issues)} 处数字，请人工检查 git diff")
+        matrix_path.write_text(apply_fix_matrix(matrix, src), encoding="utf-8")
+        print(f"已按数据源修正 README / 矩阵的 {len(doc_issues)} 处数字，请人工检查 git diff")
         return 0
     if doc_issues:
-        print("README 与数据源漂移：\n" + "\n".join("  - " + i for i in doc_issues))
+        print("README / 矩阵与数据源漂移：\n" + "\n".join("  - " + i for i in doc_issues))
     return 1
 
 

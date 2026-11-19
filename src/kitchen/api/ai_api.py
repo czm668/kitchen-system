@@ -53,6 +53,7 @@ def _adviser(scenario: str) -> Callable:
             "kind", "reading", "threshold", "detail", "advice",           # anomaly
             "queue", "idle_stations", "free_staff", "staff_pool_enabled",  # dispatch
             "question", "items", "overall", "date",                        # compliance_qa
+            "station_id", "evidence", "power_cut",                         # violation_explain
         }
         facts = {k: v for k, v in dict(data or {}).items() if k in allowed}
         return _advise(state, scenario, facts)
@@ -71,3 +72,5 @@ def register_ai_routes(router) -> None:
                _adviser("dispatch_hint"), permission=write)
     router.add("POST", "/api/ai/advise/compliance",
                _adviser("compliance_qa"), permission=write)
+    router.add("POST", "/api/ai/advise/violation",
+               _adviser("violation_explain"), permission=write)
