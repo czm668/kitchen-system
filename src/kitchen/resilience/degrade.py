@@ -176,7 +176,7 @@ def build_degrade(
     queue_pending: int = 0,
     clock_stable: bool | None = None,
     clock_offset: float = 0.0,
-    now: float | None = None,
+    wall_epoch: float | None = None,
     wall_clock=None,
 ) -> DegradeReport:
     """按各子系统的现状算出降级报告（纯函数，不读全局状态）。
@@ -185,7 +185,7 @@ def build_degrade(
     这一层要能被三端、被单测、被离线演示直接调用，不能让调用方先拼出一整套
     运行时依赖。
     """
-    moment = float((wall_clock or time.time)() if now is None else now)
+    moment = float((wall_clock or time.time)() if wall_epoch is None else wall_epoch)
     caps: list[Capability] = []
 
     # ① 端侧阈值报警：断网也照常，唯一的问题是配置可能停在缓存版本

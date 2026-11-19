@@ -152,7 +152,7 @@ class TestReplayFlow:
         for t in range(3):
             loop.tick(metrics(), now=float(t))
         assert len(queue) == 3
-        report = loop.set_online(True, now=3.0)
+        report = loop.set_online(True, wall_epoch=3.0)
         assert report.sent == 3 and report.accepted == 3
         assert len(queue) == 0 and len(store) == 3
         assert loop.online is True
@@ -164,10 +164,10 @@ class TestReplayFlow:
     def test_补传后再上线不会重复写(self, tmp_path):
         loop, queue, store, _up = make_loop(tmp_path)
         loop.tick(metrics(), now=0.0)
-        loop.set_online(True, now=1.0)
-        loop.set_online(False, now=2.0)
+        loop.set_online(True, wall_epoch=1.0)
+        loop.set_online(False, wall_epoch=2.0)
         loop.tick(metrics(), now=3.0)
-        loop.set_online(True, now=4.0)
+        loop.set_online(True, wall_epoch=4.0)
         assert len(store) == 2
         assert len(store.values("t")) == 2
 
@@ -192,7 +192,7 @@ class TestReplayFlow:
         )
         loop2.tick(metrics(), now=100.0)
         assert reloaded.last_seq == last_seq + 1
-        loop2.set_online(True, now=101.0)
+        loop2.set_online(True, wall_epoch=101.0)
         assert len(store) == 4
         assert len(store.values("t")) == 4
 

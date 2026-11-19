@@ -18,8 +18,8 @@
 ## 用法
 
 ```
-python tools/staff_demo.py
-python tools/staff_demo.py --quiet    # 只看结论
+python tools/demos/staff_demo.py
+python tools/demos/staff_demo.py --quiet    # 只看结论
 ```
 """
 from __future__ import annotations
@@ -30,7 +30,7 @@ import sys
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 
 from kitchen.staff import (                                  # noqa: E402
     AdmissionController,

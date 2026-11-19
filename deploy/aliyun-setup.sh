@@ -106,7 +106,7 @@ if [ ! -d "$DEST/web/dist" ]; then
 fi
 
 echo "==> [5/6] 安装并启动 systemd 服务"
-install -m 644 "$SRC/deploy/kitchen-api.service" /etc/systemd/system/kitchen-api.service
+install -m 644 "$SRC/deploy/legacy/kitchen-api.service" /etc/systemd/system/kitchen-api.service
 systemctl daemon-reload
 systemctl enable kitchen-api >/dev/null 2>&1 || true
 systemctl restart kitchen-api
@@ -121,7 +121,7 @@ fi
 echo "==> [6/6] 配置 nginx（域名 ${DOMAIN}）"
 if [ -f "$CERT" ]; then
   echo "    检测到证书，写入 HTTPS 全量配置"
-  sed "s/kitchen\.example\.com/${DOMAIN}/g" "$SRC/deploy/nginx.conf" >/etc/nginx/conf.d/kitchen.conf
+  sed "s/kitchen\.example\.com/${DOMAIN}/g" "$SRC/deploy/legacy/nginx.conf" >/etc/nginx/conf.d/kitchen.conf
   NGINX_MODE=https
 else
   echo "    未检测到证书，先只开 80 端口（供 certbot 签发）"

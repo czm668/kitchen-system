@@ -5,7 +5,7 @@
 > 上游依赖：`07_管理端Web与接口契约.md`（43 条接口与本终端共用）、
 > `04_功能规格与联动阈值.md`（#3/#8/#12/#13/#16 判据）
 > 代码落点：`src/kitchen/tft/`（4 模块）+ `src/kitchen/api/`（新增 cooking 路由）
-> 演示入口：`python tools/tft_demo.py`
+> 演示入口：`python tools/demos/tft_demo.py`
 
 ---
 
@@ -14,7 +14,7 @@
 A8 验收原文是「**真机与手机终端至少一条能完整演示**」。硬件（2.8" TFT +
 RC522 + DFPlayer）尚未到货，所以本阶段交付的是**模拟终端**——行为与固件
 同构（接口、屏结构、离线策略、语音编号全部一致），板子到货后按本文的映射
-表写固件，`tools/tft_demo.py` 即验收脚本。手机终端（A8-06 降级方案）已由
+表写固件，`tools/demos/tft_demo.py` 即验收脚本。手机终端（A8-06 降级方案）已由
 A7 的 Web 端覆盖：旧手机浏览器打开管理端即可。
 
 | A8 任务 | 模拟版落点 | 真机对应 |
@@ -144,7 +144,7 @@ AppState → AdmissionController / CookingBoard / LocalQueue ...
 1. **屏驱动**：2.8" ILI9341 SPI 320x240，ESP32-S3 直驱；LVGL 8.x
    （`lv_port` 模板裁剪，帧缓冲 1/10 屏）。
 2. **字库**：`lv_font_conv` 按「帧模型实际用字集合」生成 16px 字模——
-   不内嵌全量 GB2312（1.5MB Flash 放不下）；集合从 `tools/tft_demo.py`
+   不内嵌全量 GB2312（1.5MB Flash 放不下）；集合从 `tools/demos/tft_demo.py`
    的输出与接口 `note/detail` 字段抓取，脚本生成清单后人工补漏。
 3. **触摸校准**：XPT2046 四点校准，系数存 NVS；开机 `boot` 语音 +
    「点十字」引导页。
@@ -206,7 +206,7 @@ AppState → AdmissionController / CookingBoard / LocalQueue ...
   弱校验三个方向、恢复回放（含「断电重启队列不丢」）、帧模型行数；
 - 契约测试 `test_api_web_contract.py` 的 EXEMPT 白名单登记 cooking 四条
   （TFT 端接口，Web 不提供工序入口是刻意的：要刷卡身份，防远程代确认）；
-- 全量 **1203 passed**；`tools/tft_demo.py` 退出码 0（九段全链路）。
+- 全量 **1203 passed**；`tools/demos/tft_demo.py` 退出码 0（九段全链路）。
 
 ## 十、边界与未做（答辩如实说）
 

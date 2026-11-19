@@ -184,13 +184,16 @@ class OfflineFirstRuntime:
         self._offline_since: float | None = None
 
     # ---------------------------------------------------------------- 网络
-    def set_online(self, online: bool, *, now: float | None = None) -> ReplayReport | None:
+    def set_online(self, online: bool, *, wall_epoch: float | None = None) -> ReplayReport | None:
         """切换网络状态。恢复联网时顺手补传一次，返回补传结果（离线返回 None）。
 
         补传放在这里而不是 tick 里，是为了让调用方**明确**知道自己在做网络操作。
+
+        R5：收的是 epoch 秒，参数名就叫 `wall_epoch`，不再用含糊的 `now`
+        （`tick` 的 `now` 是单调秒，两条时间轴不能同名）。
         """
         online = bool(online)
-        moment = float(self._wall_clock() if now is None else now)
+        moment = float(self._wall_clock() if wall_epoch is None else wall_epoch)
         if online == self.online:
             return None
         self.online = online
@@ -240,7 +243,7 @@ class OfflineFirstRuntime:
         queued = self._enqueue(metrics, verdicts, guard_verdicts, actions, faults, now)
         degrade = None
         if with_degrade:
-            degrade = self._degrade(metrics=metrics, faults=faults, now=now)
+            degrade = self._degrade(metrics=metrics, faults=faults, wall_epoch=now)
 
         step = StepResult(
             profile=result.profile,
@@ -318,7 +321,7 @@ class OfflineFirstRuntime:
         return count
 
     # ---------------------------------------------------------------- 降级
-    def _degrade(self, *, metrics, faults: tuple[Any, ...], now: float | None) -> DegradeReport:
+    def _degrade(self, *, metrics, faults: tuple[Any, ...], wall_epoch: float | None) -> DegradeReport:
         vision = None
         guard = getattr(self.runtime, "flame_guard", None)
         if guard is not None and hasattr(guard, "vision_health"):
@@ -330,7 +333,7 @@ class OfflineFirstRuntime:
             sensor_faults=faults,
             config_degraded=bool(getattr(self.runtime.config, "degraded", False)),
             queue_pending=len(self.queue) if self.queue is not None else 0,
-            now=now,
+            wall_epoch=wall_epoch,
             wall_clock=self._wall_clock,
         )
 

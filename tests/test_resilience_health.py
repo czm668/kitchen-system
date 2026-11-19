@@ -151,7 +151,7 @@ class TestTicket:
     def test_关单后的新故障另开一单(self):
         mon = make_monitor(heartbeat_timeout_sec=1000.0)
         mon.observe({"fridge_temp": 85.0}, now=T0)
-        mon.close(1, reviewer="运维:王", note="换探头", now=T0 + 60.0)
+        mon.close(1, reviewer="运维:王", note="换探头", wall_epoch=T0 + 60.0)
         mon.observe({"fridge_temp": 4.0}, now=T0 + 70.0)
         mon.observe({"fridge_temp": -127.0}, now=T0 + 80.0)
         assert len(mon.tickets()) == 2
@@ -167,13 +167,13 @@ class TestTicket:
     def test_关闭已关闭的单是幂等的(self):
         mon = make_monitor()
         mon.observe({"fridge_temp": 85.0}, now=T0)
-        mon.close(1, now=T0 + 10.0)
-        assert mon.close(1, now=T0 + 20.0).state == "closed"
+        mon.close(1, wall_epoch=T0 + 10.0)
+        assert mon.close(1, wall_epoch=T0 + 20.0).state == "closed"
 
     def test_接单已关闭的单报错(self):
         mon = make_monitor()
         mon.observe({"fridge_temp": 85.0}, now=T0)
-        mon.close(1, now=T0 + 10.0)
+        mon.close(1, wall_epoch=T0 + 10.0)
         with pytest.raises(ValueError):
             mon.ack(1, reviewer="运维:王")
 

@@ -59,12 +59,12 @@ def _frame(**overrides: float) -> dict[str, float]:
 def _ticks_until_alarm(state, frame: dict[str, float], timeout: float,
                        want_guard: bool = True):
     """喂故障帧直到报警。返回 (延迟秒, 保护层判定, 规则层判定, 动作)。"""
-    start = state.now()
+    start = state.monotonic()
     deadline = start + timeout
     guard_hit: Any = None
     rule_hit: Any = None
     actions: tuple[str, ...] = ()
-    while state.now() < deadline:
+    while state.monotonic() < deadline:
         step = state.tick(frame)
         if want_guard and guard_hit is None and step.guard_verdicts:
             guard_hit = step.guard_verdicts[0]
@@ -74,7 +74,7 @@ def _ticks_until_alarm(state, frame: dict[str, float], timeout: float,
                 rule_hit = fired[0]
         if step.actions:
             actions = step.actions
-            return state.now() - start, guard_hit, rule_hit, actions
+            return state.monotonic() - start, guard_hit, rule_hit, actions
         time.sleep(TICK)
     return None, guard_hit, rule_hit, actions
 
@@ -112,11 +112,11 @@ def run_false_alarm(workdir: Path, seconds: float = 60.0) -> dict[str, Any]:
              "h": 2.0}
     alarms = 0
     ticks = 0
-    deadline = state.now() + seconds
-    while state.now() < deadline:
+    deadline = state.monotonic() + seconds
+    while state.monotonic() < deadline:
         frame = dict(SAFE)
         for metric, amp in noise.items():
-            frame[metric] += (state.now() * 7.0 % 2 - 1) * amp
+            frame[metric] += (state.monotonic() * 7.0 % 2 - 1) * amp
         step = state.tick(frame)
         ticks += 1
         alarms += sum(1 for v in step.verdicts if v.fired or v.latched)

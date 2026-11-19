@@ -18,8 +18,8 @@
 ## 用法
 
 ```
-python tools/tft_demo.py
-python tools/tft_demo.py --quiet      # 只看结论不画屏
+python tools/demos/tft_demo.py
+python tools/demos/tft_demo.py --quiet      # 只看结论不画屏
 ```
 
 ## 与真机的关系
@@ -35,8 +35,8 @@ import sys
 import tempfile
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tests"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "tests"))
 
 from kitchen.api import create_server                          # noqa: E402
 from kitchen.tft import DirectTransport, TftTerminal, render_frame  # noqa: E402

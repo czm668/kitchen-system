@@ -17,7 +17,7 @@
 #   docker compose -f docker-compose.lite.yml config   # 先校验
 #   docker compose -f docker-compose.lite.yml up -d --build
 #
-# 反向代理：宿主机 nginx 反代到 127.0.0.1:8848（见 deploy/nginx.conf）。
+# 反向代理：宿主机 nginx 反代到 127.0.0.1:8848（见 deploy/legacy/nginx.conf）。
 # 端口只绑回环，不直接对公网开放 8848。
 
 services:

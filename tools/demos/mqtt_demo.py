@@ -4,13 +4,13 @@
 三种跑法::
 
     # 1) 全进程内（零依赖，离线也能演示链路代码路径）
-    python tools/mqtt_demo.py
+    python tools/demos/mqtt_demo.py
 
     # 2) 内嵌 amqtt broker（真协议真 socket，装了 amqtt+paho 即可）
-    python tools/mqtt_demo.py --amqtt
+    python tools/demos/mqtt_demo.py --amqtt
 
     # 3) 连外部 broker（EMQX / mosquitto / 内网 broker）
-    python tools/mqtt_demo.py --broker 127.0.0.1:1883
+    python tools/demos/mqtt_demo.py --broker 127.0.0.1:1883
 
 演示内容：回放 8 秒注入脚本（含 t=3s RC522 刷卡事件帧），燃气脉冲帧触发
 规则告警，下发一次三通道动作并等待设备端 ACK；结束打印网关统计 + 运行
@@ -27,7 +27,7 @@ import threading
 import time
 from pathlib import Path
 
-_ROOT = Path(__file__).resolve().parents[1]
+_ROOT = Path(__file__).resolve().parents[2]
 for _p in (str(_ROOT / "src"), str(_ROOT)):
     if _p not in sys.path:
         sys.path.insert(0, _p)

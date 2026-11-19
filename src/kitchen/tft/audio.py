@@ -37,19 +37,14 @@ class VoiceTrack:
 
 
 #: 编号表（真机 SD 卡曲目清单）。**只追加、不改号**。
+#: 单一来源在 fixtures/kitchen_constants.json；这里由 constants.py 加载 + 校验
+#: （编号连续、名字唯一），改错数值会在导入期报错，不会演示时才静默错位。
+from ..constants import voice_table as _voice_table  # noqa: E402
+
 VOICE_TABLE: dict[str, VoiceTrack] = {
-    "boot":        VoiceTrack(1, "boot", "设备自检完成", 5),
-    "new_order":   VoiceTrack(2, "new_order", "来了新单，请注意", 3),
-    "urge":        VoiceTrack(3, "urge", "有客人催菜", 2),
-    "alarm":       VoiceTrack(4, "alarm", "请注意，设备报警", 0),
-    "card_ok":     VoiceTrack(5, "card_ok", "身份确认", 4),
-    "card_denied": VoiceTrack(6, "card_denied", "身份未通过，请联系组长", 1),
-    "weigh_bad":   VoiceTrack(7, "weigh_bad", "配料超差，请重新称重", 1),
-    "serve":       VoiceTrack(8, "serve", "出餐确认", 4),
-    "offline":     VoiceTrack(9, "offline", "网络断开，转入离线模式", 2),
-    "replay":      VoiceTrack(10, "replay", "网络恢复，数据已同步", 3),
-    "ccp_block":   VoiceTrack(11, "ccp_block", "关键控制点未确认，禁止出餐", 1),
-    "sensor_fault": VoiceTrack(12, "sensor_fault", "传感器故障，请检修", 0),
+    key: VoiceTrack(int(row["no"]), str(row["name"]), str(row["text"]),
+                    int(row.get("priority", 5)))
+    for key, row in _voice_table().items()
 }
 
 #: 事件流 kind → 语音键（终端订阅事件流后按这张表触发播报）。

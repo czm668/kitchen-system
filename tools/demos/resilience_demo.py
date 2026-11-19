@@ -19,9 +19,9 @@
 ## 用法
 
 ```
-python tools/resilience_demo.py
-python tools/resilience_demo.py --quiet            # 只打印结论
-python tools/resilience_demo.py --data var/queue   # 指定队列文件落点
+python tools/demos/resilience_demo.py
+python tools/demos/resilience_demo.py --quiet            # 只打印结论
+python tools/demos/resilience_demo.py --data var/queue   # 指定队列文件落点
 ```
 """
 from __future__ import annotations
@@ -32,7 +32,7 @@ import sys
 from datetime import datetime, timedelta
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 
 from kitchen.domain import CST                                    # noqa: E402
 from kitchen.resilience import (                                 # noqa: E402
@@ -239,7 +239,7 @@ def step9_degrade(verbose: bool) -> None:
         vision={"online": False, "age_sec": 95.0},
         sensor_faults=[{"metric": "fridge_temp", "label": "超量程"}],
         queue_pending=42,
-        now=float(T0.timestamp()),
+        wall_epoch=float(T0.timestamp()),
     )
     say(verbose, f"  严重度：{report.severity} / 标题：{report.headline}")
     for line in report.describe().splitlines()[1:]:
@@ -281,7 +281,7 @@ def step10_end_to_end(verbose: bool, root: Path) -> None:
     assert len(fired) == 3
     assert "gas_valve_close" in actions and "fan_on" in actions
 
-    report = loop.set_online(True, now=32.0)
+    report = loop.set_online(True, wall_epoch=32.0)
     say(verbose, f"  恢复网络：{report.describe()}")
     say(verbose, f"  服务端收到 {len(store)} 行，队列剩 {len(queue)} 条")
     assert len(queue) == 0 and len(store) > 0

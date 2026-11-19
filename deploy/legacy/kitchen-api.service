@@ -1,6 +1,6 @@
 # 后厨管理系统 - systemd 服务单元（A4 / A20 阿里云）
 # 安装：
-#   sudo cp deploy/kitchen-api.service /etc/systemd/system/
+#   sudo cp deploy/legacy/kitchen-api.service /etc/systemd/system/
 #   sudo systemctl daemon-reload && sudo systemctl enable --now kitchen-api
 # 日志：journalctl -u kitchen-api -f
 #

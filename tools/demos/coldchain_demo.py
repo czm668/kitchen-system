@@ -12,8 +12,8 @@
 ## 用法
 
 ```
-python tools/coldchain_demo.py
-python tools/coldchain_demo.py --step 2 --quiet
+python tools/demos/coldchain_demo.py
+python tools/demos/coldchain_demo.py --step 2 --quiet
 ```
 """
 from __future__ import annotations
@@ -23,7 +23,7 @@ import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 
 from kitchen.rules.config_store import load_builtin         # noqa: E402
 from kitchen.runtime import KitchenRuntime                  # noqa: E402

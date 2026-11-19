@@ -151,9 +151,21 @@ def check_docs_vs_source(src: dict[str, Any], readme: str) -> list[str]:
         if int(m.group(1)) != scale["migrations"]:
             issues.append(f"README 迁移编号：写 001–{m.group(1)}，"
                           f"应为 001–{scale['migrations']:03d}")
-    for m in re.finditer(r"共\s*(\d+)\s*个\s*pytest\s*用例", readme):
-        if int(m.group(1)) != scale["pytest_cases"]:
-            issues.append(f"README pytest 用例：写 {m.group(1)}，应为 {scale['pytest_cases']}")
+    # pytest 数字有五种写法（审查报告 §2.1：11+ 处漂移就是这么来的）：
+    #   badge、规模表、快速开始、目录树、跑单测段。全部纳入守卫。
+    pytest_patterns = (
+        r"(tests-)(\d+)(-brightgreen)",              # badge
+        r"(\| 测试 \| )(\d+)( 项 pytest)",           # 规模表
+        r"(单测（)(\d+)( 项，纯标准库)",              # 快速开始
+        r"(tests/\s+)(\d+)( 条单测)",                # 目录树
+        r"(跑全部单测（)(\d+)( 条)",                  # 跑单测段
+        r"(共\s*)(\d+)(\s*个\s*pytest\s*用例)",       # 既有口径
+    )
+    for pat in pytest_patterns:
+        for m in re.finditer(pat, readme):
+            if int(m.group(2)) != scale["pytest_cases"]:
+                issues.append(f"README pytest 数字：写 {m.group(2)}，"
+                              f"应为 {scale['pytest_cases']}（{m.group(0)[:44]}）")
     return issues
 
 
@@ -166,6 +178,14 @@ def apply_fix(readme: str, src: dict[str, Any]) -> str:
                   rf"\g<1>{scale['migrations']:03d}", text)
     text = re.sub(r"(共\s*)\d+(\s*个\s*pytest\s*用例)",
                   rf"\g<1>{scale['pytest_cases']}\2", text)
+    for pat in (
+        r"(tests-)\d+(-brightgreen)",
+        r"(\| 测试 \| )\d+( 项 pytest)",
+        r"(单测（)\d+( 项，纯标准库)",
+        r"(tests/\s+)\d+( 条单测)",
+        r"(跑全部单测（)\d+( 条)",
+    ):
+        text = re.sub(pat, rf"\g<1>{scale['pytest_cases']}\g<2>", text)
     return text
 
 

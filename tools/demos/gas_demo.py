@@ -14,9 +14,9 @@
 
 用法::
 
-    python tools/gas_demo.py                # 文本时间线
-    python tools/gas_demo.py --json         # 机器可读，便于写进系统记录
-    python tools/gas_demo.py --speed 60     # 60 倍速（默认 300 倍，2Hz 采样按秒聚合）
+    python tools/demos/gas_demo.py                # 文本时间线
+    python tools/demos/gas_demo.py --json         # 机器可读，便于写进系统记录
+    python tools/demos/gas_demo.py --speed 60     # 60 倍速（默认 300 倍，2Hz 采样按秒聚合）
 """
 from __future__ import annotations
 
@@ -26,7 +26,7 @@ import random
 import sys
 from pathlib import Path
 
-_CODE_ROOT = Path(__file__).resolve().parents[1]
+_CODE_ROOT = Path(__file__).resolve().parents[2]
 if str(_CODE_ROOT / "src") not in sys.path:
     sys.path.insert(0, str(_CODE_ROOT / "src"))
 

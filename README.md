@@ -2,7 +2,7 @@
 
 [![ci](https://github.com/czm668/kitchen-system/actions/workflows/ci.yml/badge.svg)](https://github.com/czm668/kitchen-system/actions/workflows/ci.yml)
 [![python](https://img.shields.io/badge/python-3.11-3776ab)](pyproject.toml)
-[![tests](https://img.shields.io/badge/tests-1458-brightgreen)](tests)
+[![tests](https://img.shields.io/badge/tests-1494-brightgreen)](tests)
 [![license](https://img.shields.io/badge/license-non--commercial-red)](LICENSE)
 
 > 定稿题目《基于 ESP32 的后厨智能调度与食安合规管理系统的设计与实现》
@@ -70,7 +70,7 @@ flowchart TB
 | 领域代码 | 103 个模块 / 31,683 行 Python（运行时零第三方依赖） |
 | 数据 | 51 张表 · 19 个版本化迁移 · 4 张核心状态机 |
 | 接口 | 93 个 HTTP 接口（主路由 65 + 扩展 28） |
-| 测试 | 1458 项 pytest，覆盖判定边界、状态机、存储双后端、接口契约 |
+| 测试 | 1494 项 pytest，覆盖判定边界、状态机、存储双后端、接口契约 |
 | 前端 | Vue 3 管理端 12 视图；小程序 9 页 |
 | 部署 | Docker Compose 三容器，阿里云 1 GiB 实测共占 206 MB |
 
@@ -84,18 +84,24 @@ flowchart TB
 
 ## 快速开始
 
+**唯一生产入口**：`kitchen`（装了 `pip install -e .` 后），或等效的
+`python -m kitchen.api.server --static web/dist`。浏览器打开 http://127.0.0.1:8848/。
+`tools/demos/` 下全是离线演示脚本，**不是服务入口**——别从那里挑一个跑就以为服务起来了。
+
 ```bash
-# 1) 单测（1468 项，纯标准库，不装任何依赖）
+# 1) 单测（1494 项，纯标准库，不装任何依赖）
 python -m pytest -q
 
-# 2) 本地 CI：单测 + 迁移校验 + 前端契约 + 小程序自检
+# 2) 本地 CI：R5 时钟守卫 + 数字守卫 + 单测 + 迁移 + 前端 + 小程序（6 关）
 python tools/ci.py
 
-# 3) 起服务（先 pip install -e . 或设 PYTHONPATH=src），浏览器打开 http://127.0.0.1:8848/
-python -m kitchen.api.server --static web/dist
+# 3) 起服务
+pip install -e . && kitchen                 # 或：python -m kitchen.api.server --static web/dist
 ```
 
-更多命令（离线仿真、MQTT 真链路、TFT 终端、管理端 dev 模式）见下方《快速开始》原文。
+Windows 用户可用 `tools/kitchen.bat`：`serve` 起生产服务、`serve-miniapp` 起小程序临时服务器
+（原先 `serve` 名不副实，实际起的是后者，已修正）。更多命令（离线仿真、MQTT 真链路、
+TFT 终端、管理端 dev 模式）见下方《快速开始》原文。
 
 ## 部署
 
@@ -255,7 +261,7 @@ kitchen-system/                     ← 毕设项目根（文档 + 代码分开�
 │       │   ├── vision_dataset.yaml        视觉数据集配置（names 顺序 = 模型 class id）
 │       │   └── seed_kitchen.sql           种子数据（工位/菜品配方SOP/员工工牌/监测点阈值）
 │       ├── firmware/esp32cam/         ESP32-CAM MJPEG 推流（草图，未编译；引脚表+供电规范）
-│       ├── tests/                     1458 条单测（含 MQTT 链路 6 条、调度器 9 条、prod 安全 4 条）
+│       ├── tests/                     1494 条单测（含 MQTT 链路 6 条、调度器 9 条、prod 安全 4 条）
 │       │   └── fixtures/qr_golden.json    二维码基准哈希（满容量用例由 segno 逐掩码比对确认）
 │       ├── tools/
 │       │   ├── legacy.py                  旧目录素材取用器（list / fetch / verify / check）
@@ -314,8 +320,8 @@ web/
 PY="python"     # 本机便携版：D:/liulan1/毕设/.local/python311/python.exe
 cd "02_项目代码/kitchen"
 
-# 跑全部单测（1458 条）
-# MQTT 真链路演示（A2）：python tools/mqtt_demo.py --amqtt
+# 跑全部单测（1494 条）
+# MQTT 真链路演示（A2）：python tools/demos/mqtt_demo.py --amqtt
 "$PY" -m pytest -q
 
 # 本地 CI（A7）：一条命令验全部（pytest + 迁移校验 + web_check + miniapp_check）
@@ -372,8 +378,8 @@ python tools/miniapp_netcheck.py     # 网络体检（报「网络不可用」�
 
 ```bash
 cd "02_项目代码/kitchen"
-"$PY" tools/tft_demo.py          # 九段全链路：上线→新单→刷卡→工序→断网→恢复→出餐
-"$PY" tools/tft_demo.py --quiet  # 只看结论
+"$PY" tools/demos/tft_demo.py          # 九段全链路：上线→新单→刷卡→工序→断网→恢复→出餐
+"$PY" tools/demos/tft_demo.py --quiet  # 只看结论
 ```
 
 ## 跑管理端（A7）
@@ -444,14 +450,14 @@ cd web && npm run build          # → web/dist（约 745KB / gzip 258KB）
 | P1/T1+T2 迁移 | ✅ 从旧工程迁入并按新包名重组，25 条原单测全部保留并通过 |
 | 模拟前端 HAL | ✅ `hal/` 三模块 + 70 条单测；MQ-2 分压、SCT-013 分辨率、火焰极性、ADC2 约束全部落成可执行校验，见 `03_设计文档/06_模拟前端实施方案.md` |
 | 新工程自带层 | ✅ 场景契约加载器（加载期校验）、kitchen-only 模拟器、素材取用器 |
-| #1 燃气判定 | ✅ 基线 + 突变率两级 + 明火放宽 + 周更固化（`tools/gas_demo.py`） |
-| #2 排烟分档 | ✅ 三档时段表 + 端侧配置缓存 + 温升 OR 判据 + 清理工单（`tools/hood_demo.py`） |
-| #3 明火离人 | ✅ 视觉 AND 火焰 + 工位锁 + 返岗刷卡 + 失联降级（`tools/flame_demo.py`） |
-| #5/#6 冷链与留样柜 | ✅ 分级超限 + 120 秒确认 + 开门波动过滤（`tools/coldchain_demo.py`） |
+| #1 燃气判定 | ✅ 基线 + 突变率两级 + 明火放宽 + 周更固化（`tools/demos/gas_demo.py`） |
+| #2 排烟分档 | ✅ 三档时段表 + 端侧配置缓存 + 温升 OR 判据 + 清理工单（`tools/demos/hood_demo.py`） |
+| #3 明火离人 | ✅ 视觉 AND 火焰 + 工位锁 + 返岗刷卡 + 失联降级（`tools/demos/flame_demo.py`） |
+| #5/#6 冷链与留样柜 | ✅ 分级超限 + 120 秒确认 + 开门波动过滤（`tools/demos/coldchain_demo.py`） |
 | #7 温湿度联动 | ✅ level=0 只联动排风，与 #1/#2 共用 CH2 |
-| 互锁编排（A2-08） | ✅ 三源共用排风 / 优先级压制 / 全部恢复才关 / 人工确认留痕（`tools/interlock_demo.py`） |
+| 互锁编排（A2-08） | ✅ 三源共用排风 / 优先级压制 / 全部恢复才关 / 人工确认留痕（`tools/demos/interlock_demo.py`） |
 | P2 一屏复盘 | ✅ `tools/p2_dashboard.py`（CLI 版；真看板在 A7） |
-| #8 晨检准入（A3-02） | ✅ 五道门 + 问卷 + 当日锁定 + 组长双通道复核（`tools/staff_demo.py`） |
+| #8 晨检准入（A3-02） | ✅ 五道门 + 问卷 + 当日锁定 + 组长双通道复核（`tools/demos/staff_demo.py`） |
 | #9 健康证拦截（A3-03） | ✅ 按日期判定 + 每日扫描置 expired + 拦截当日排班 |
 | #10 资质匹配后台（A3-04） | ✅ 候选集四条件（启用/资质/证件/晨检）+ A4-09 已接进派单 |
 | #11 未授权上岗告警（A3-05） | ✅ 在场积分 + 5 秒去抖 + 只开一张单（`staff/duty.py`） |
@@ -477,7 +483,7 @@ cd web && npm run build          # → web/dist（约 745KB / gzip 258KB）
 | #17 三端降级（A6-05） | ✅ 同一份事实三种排版，逐条点名不可用能力（`resilience/degrade.py`） |
 | #17 端到端装配（A6） | ✅ `tick()` 内无网络 IO，断网只影响上报（`resilience/offline.py`） |
 | 管理端壳与鉴权（A7-01） | ✅ 自研 hash 路由 + 四角色九权限 + 登录锁定（`web/` + `api/auth.py`） |
-| 后厨 TFT 终端（A8-02~06） | ✅ 模拟版全链路：4 屏帧模型 + 离线缓冲/恢复同步 + DFPlayer 编号表 + cooking 5 条 API（`tft/`，`tools/tft_demo.py` 九段）；真机等板子（设计文档 08 §六） |
+| 后厨 TFT 终端（A8-02~06） | ✅ 模拟版全链路：4 屏帧模型 + 离线缓冲/恢复同步 + DFPlayer 编号表 + cooking 5 条 API（`tft/`，`tools/demos/tft_demo.py` 九段）；真机等板子（设计文档 08 §六） |
 | 顾客端小程序（A9-01~07） | ✅ 模拟版全链路：顾客通道 7 条 API + `miniapp/` 原生 3 页（`miniapp_check.py` **46 项**）；**11/13 测试用途 AppID 已填 + 手机真机预览链路打通**（设计文档 09 §7.1~7.2）；正式发布等 H4（§7.3） |
 | 联调/演示/验收（A10-01~07） | ✅ 软件侧收口：三端联调测试 5 条（抓 2 真 bug）+ `soak_test.py` 7 项（12000 帧内存收敛）+ 演示脚本/录屏分镜 + 对比实验三组（燃气/超温 0.0s、明火离人 12.0s、误报 0）+ 注入演示角标 + 答辩问答 13 问；录屏与真机长跑待人工/硬件 |
 | 订单与调度（A7-02） | ✅ 实时订单流 / 派单 / 催菜置顶 / 沽清（`views/OrdersView.vue`） |

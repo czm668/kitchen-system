@@ -641,7 +641,7 @@ def close_ticket(state, session: Session, params, body) -> dict[str, Any]:
     before = state.health.ticket(ticket_id)
     ticket = state.health.close(
         ticket_id, reviewer=session.subject,
-        note=str(body.get("note") or ""), now=state.wall(),
+        note=str(body.get("note") or ""), wall_epoch=state.wall_epoch(),
     )
     _audit(state, session, "ticket.close", target=f"#{ticket_id}",
            before={"state": None if before is None else before.state},

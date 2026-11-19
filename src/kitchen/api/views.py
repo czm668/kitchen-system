@@ -290,7 +290,7 @@ def interlock_view(state, query: dict[str, Any]) -> dict[str, Any]:
         "channels": rows,
         "signal": snapshot.get("GPIO_SIGNAL", {}),
         "degraded": controller.degraded,
-        "guards": state.offline.guards.snapshot(now=state.now()),
+        "guards": state.offline.guards.snapshot(now=state.monotonic()),
         "restore_requires": {
             "manual_confirm": True,
             "ch3_double_review": ["web", "tft"],
@@ -514,15 +514,15 @@ def ticket_view(state, query: dict[str, Any]) -> dict[str, Any]:
     合流而不是分三个页签：现场运维关心的是「今天有几件事要处理」，不关心
     它来自哪个子系统。`source` 字段负责溯源。
     """
-    now = state.wall()
+    epoch_now = state.wall_epoch()
     rows: list[dict[str, Any]] = []
     for ticket in state.health.tickets():
         payload = ticket.to_payload()
         payload.update({
             "source": "sensor",
             "opened_at_text": _ts_text(ticket.opened_at),
-            "overdue": ticket.is_overdue(now),
-            "age_sec": round(max(0.0, now - ticket.opened_at), 1),
+            "overdue": ticket.is_overdue(epoch_now),
+            "age_sec": round(max(0.0, epoch_now - ticket.opened_at), 1),
         })
         rows.append(payload)
     for record in state.disinfection.records:

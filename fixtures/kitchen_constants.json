@@ -1,0 +1,36 @@
+{
+  "_readme": "隐式常量的唯一来源（审查报告 §3 P2）。编号一经发布不得改；由 src/kitchen/constants.py 加载并校验，改错数值会在启动时报错，不会静默错位。",
+
+  "voice_table": {
+    "boot":        {"no": 1,  "name": "boot",        "text": "设备自检完成",           "priority": 5},
+    "new_order":   {"no": 2,  "name": "new_order",   "text": "来了新单，请注意",       "priority": 3},
+    "urge":        {"no": 3,  "name": "urge",        "text": "有客人催菜",             "priority": 2},
+    "alarm":       {"no": 4,  "name": "alarm",       "text": "请注意，设备报警",       "priority": 0},
+    "card_ok":     {"no": 5,  "name": "card_ok",     "text": "身份确认",               "priority": 4},
+    "card_denied": {"no": 6,  "name": "card_denied", "text": "身份未通过，请联系组长", "priority": 1},
+    "weigh_bad":   {"no": 7,  "name": "weigh_bad",   "text": "配料超差，请重新称重",   "priority": 1},
+    "serve":       {"no": 8,  "name": "serve",       "text": "出餐确认",               "priority": 4},
+    "offline":     {"no": 9,  "name": "offline",     "text": "网络断开，转入离线模式", "priority": 2},
+    "replay":      {"no": 10, "name": "replay",      "text": "网络恢复，数据已同步",   "priority": 3},
+    "ccp_block":   {"no": 11, "name": "ccp_block",   "text": "关键控制点未确认，禁止出餐", "priority": 1},
+    "sensor_fault":{"no": 12, "name": "sensor_fault","text": "传感器故障，请检修",     "priority": 0}
+  },
+
+  "demo_durations": [
+    {"label": "#3 明火离人确认", "real_sec": 12.0, "note": "设计值：火焰持续 12 秒无人 → 关气 + 播报"},
+    {"label": "#1 燃气确认窗口", "real_sec": 30.0, "note": "设计值：连续超限 30 秒 → 关阀"},
+    {"label": "#15 消毒达标累计", "real_sec": 3600.0, "note": "设计值：100~120℃ 累计 60 分钟"},
+    {"label": "#6 留样时限", "real_sec": 172800.0, "note": "设计值：留样保存 48 小时"}
+  ],
+  "demo_durations_insert_at": 2,
+  "demo_durations_note": "长烧无人看管（#3）的时长来自运行期配置 flame_hold_sec，不在此表；插入位置 demo_durations_insert_at=2 表示它排在明火与燃气之后。",
+
+  "mqtt": {
+    "root": "kitchen",
+    "topics": {
+      "telemetry": "{root}/{device_id}/telemetry",
+      "events": "{root}/{device_id}/events",
+      "actions": "{root}/{device_id}/actions"
+    }
+  }
+}

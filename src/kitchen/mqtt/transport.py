@@ -19,23 +19,31 @@ import json
 import threading
 from typing import Any, Callable, Protocol
 
-#: topic 根前缀，预留多场景（kitchen 之外）扩展
-DEFAULT_ROOT = "kitchen"
+#: topic 根前缀与模板来自 fixtures/kitchen_constants.json（审查报告 §3 P2）。
+#: 单一来源 + 启动期校验，避免改了 docs/05 的约定却漏改代码里的主题格式。
+from ..constants import constants as _constants  # noqa: E402
+
+DEFAULT_ROOT = _constants()["mqtt"]["root"]
+_TOPICS = _constants()["mqtt"]["topics"]
 
 #: 订阅回调签名：topic、解码后的 payload
 Handler = Callable[[str, dict[str, Any]], None]
 
 
+def _topic(key: str, device_id: str, root: str) -> str:
+    return _TOPICS[key].format(root=root, device_id=device_id)
+
+
 def topic_telemetry(device_id: str, root: str = DEFAULT_ROOT) -> str:
-    return f"{root}/{device_id}/telemetry"
+    return _topic("telemetry", device_id, root)
 
 
 def topic_events(device_id: str, root: str = DEFAULT_ROOT) -> str:
-    return f"{root}/{device_id}/events"
+    return _topic("events", device_id, root)
 
 
 def topic_actions(device_id: str, root: str = DEFAULT_ROOT) -> str:
-    return f"{root}/{device_id}/actions"
+    return _topic("actions", device_id, root)
 
 
 class Transport(Protocol):

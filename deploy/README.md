@@ -1,8 +1,14 @@
 # 部署手册（A4）
 
-> 本目录的 Dockerfile / compose / nginx / systemd 是**部署模板**，对应
-> `03_设计文档/01_系统总体架构.md` §7 的单机 Docker 编排（emqx+api+mysql+vision）。
-> 答辩演示机即跑该 compose 栈（api + MySQL 同机，8848 端口），**存储引擎为 MySQL 8**,
+> 本目录的 Dockerfile / compose 是**当前部署路径**：云端实跑
+> `docker-compose.1g.yml`（api + MySQL + backup 三容器，`--static` 单端口直连 80）。
+>
+> **`legacy/` 是归档的裸机可选路径，云端未使用**：`nginx.conf` +
+> `kitchen-api.service` 对应 systemd + nginx 反代那套部署。保留是为了"三种部署形态"
+> 叙述完整（`aliyun-setup.sh` 仍可用），但**线上没走它**——别看到就以为生产环境有 nginx。
+> 见审查报告 §2.1 P2。
+>
+> 答辩演示机跑 compose 栈（api + MySQL 同机，8848 端口），**存储引擎为 MySQL 8**,
 > 已实测通过；无 MySQL 环境时 `server` 自动回退 SQLite（零依赖开发回退，非设计主线）。
 >
 > **11/15 14:12 容器实测已完成**：Docker Desktop 4.99 / 引擎 29.9.3，
@@ -39,7 +45,7 @@ Windows 进程守护不用 NSSM/任务计划也行——答辩演示场景「一
 sudo useradd -r -s /usr/sbin/nologin kitchen
 sudo rsync -a --exclude '.local' --exclude 'backups' ./ /opt/kitchen/
 cd /opt/kitchen && python3 -m venv .venv && .venv/bin/pip install .
-sudo cp deploy/kitchen-api.service /etc/systemd/system/
+sudo cp deploy/legacy/kitchen-api.service /etc/systemd/system/
 # 编辑 /etc/kitchen/kitchen.env：KITCHEN_ADMIN_PASSWORD / KITCHEN_API_SECRET
 sudo systemctl enable --now kitchen-api
 journalctl -u kitchen-api -f    # 看日志
@@ -87,7 +93,7 @@ compose 场景下 db_url 优先，SQLite 文件不再被写。若需裸机（无
 
 ### 反向代理与 HTTPS（两路径通用）
 
-`deploy/nginx.conf`：反代 8848、HTTPS 证书位、**SSE 长连接配置**
+`deploy/legacy/nginx.conf`：反代 8848、HTTPS 证书位、**SSE 长连接配置**
 （`/api/events` 禁缓冲 + 1h 读超时——不配的话前端事件流每 60s 断连）、
 登录接口限速、`X-Forwarded-For` 转发。`certbot` 换真证书即可。
 
@@ -366,7 +372,7 @@ docker compose -f docker-compose.1g.yml up -d --build
 sudo apt-get install -y nginx certbot
 sudo systemctl stop nginx                     # 让 certbot 独占 80 签发
 sudo certbot certonly --standalone -d 你的域名 --agree-tos -m you@example.com
-sudo sed "s/kitchen\.example\.com/你的域名/g" deploy/nginx.conf > /etc/nginx/conf.d/kitchen.conf
+sudo sed "s/kitchen\.example\.com/你的域名/g" deploy/legacy/nginx.conf > /etc/nginx/conf.d/kitchen.conf
 sudo rm -f /etc/nginx/sites-enabled/default
 sudo nginx -t && sudo systemctl enable --now nginx
 
@@ -936,3 +942,32 @@ sensor_readings 16490 行 → data 1.52 MB + index 3.34 MB ≈ 4.9 MB（297 B/�
 docker exec kitchen-backup sh -c \
   'eval "$(sed -n "/^purge_table()/,/^}/p" /backup-sidecar.sh)"; purge_table sensor_readings 7 20000 3'
 ```
+
+---
+
+### 5.14 答辩前凭据隔离清单（审查报告 §0 P0-4 / §6 D1）
+
+`deploy/.env` 含真实 DeepSeek Key 与 MySQL 口令。它已被 `.gitignore` 拦住、**未进 GitHub**
+（`git ls-files` 查不到），但"没进 git"不等于"没进答辩包"——打包/投屏时仍可能误带。
+
+**机器可查的部分**（本地跑，非零退出就是有泄漏）：
+
+```bash
+python tools/delivery_check.py .                  # 扫仓库：期望只有 .env 命中（这是本地文件，不打包它）
+python tools/delivery_check.py D:/答辩包/kitchen  # 扫真正要带走的目录：必须 OK
+python tools/delivery_check.py --strict D:/答辩包 # 连 .env.example 模板也提示移除
+```
+
+脚本只扫文件名与疑似 Key 前缀，**不读也不打印任何凭据内容**；命中即说明该目录不能外带。
+
+**必须人工做的部分**（脚本替不了）：
+
+- [ ] 答辩包/投屏目录**只放 `docs/`、源码、`web/dist`、论文图表**；不要整个仓库压缩带走。
+- [ ] 从答辩包移除 `.env`、`*.pem` 私钥、`firmware/esp32cam/secrets.h`（真 WiFi 口令）。
+- [ ] **答辩前轮换 DeepSeek Key**：现用 Key 曾出现在本地 `.env`，一旦投屏/录屏入镜即视为泄露；
+      在 DeepSeek 控制台作废旧 Key、生成新 Key，只填服务器上的 `.env`，**不要回填到本地答辩包**。
+- [ ] MySQL 口令同理：答辩演示用只读账号或临时口令，答辩后改回。
+- [ ] 演示用 `http://101.37.82.186` 裸 IP + HTTP，投屏时不要输入任何真实口令截图。
+
+> 这两条是"可辩护边界"的组成部分：代码里凭据管理做得再干净，投屏时漏一张含 Key 的
+> 截图就全部作废。审查报告把它列为四个 P0 之一，不要当成形式清单。

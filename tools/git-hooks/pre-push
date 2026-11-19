@@ -1,0 +1,43 @@
+#!/usr/bin/env bash
+# 审查报告 §4.2 / R3：push 前本地跑完整 CI，改 deploy/ 时额外校验 compose 配置。
+# 安装：bash tools/install-hooks.sh
+# 临时跳过：KITCHEN_SKIP_PREPUSH=1 git push（只在确信本地已跑过 CI 时用）
+set -u
+
+cd "$(git rev-parse --show-toplevel)" || exit 1
+
+if [ "${KITCHEN_SKIP_PREPUSH:-}" = "1" ]; then
+    echo "[pre-push] KITCHEN_SKIP_PREPUSH=1，跳过本地 CI（后果自负）"
+    exit 0
+fi
+
+echo "[pre-push] 跑完整 CI（约 3 分钟）..."
+if ! python tools/ci.py; then
+    echo "[pre-push] CI 未通过，已阻止 push。修好后重试。"
+    exit 1
+fi
+
+# R3：本次要推的提交里只要动了 deploy/，就本地校验 compose 配置。
+# 云端仍须另跑 deploy/verify-cloud.sh —— 本地 config 只证明语法，不证明行为。
+range="HEAD"
+if git rev-parse --verify '@{upstream}' >/dev/null 2>&1; then
+    range="@{upstream}..HEAD"
+fi
+if git diff --name-only "$range" | grep -q '^deploy/'; then
+    echo "[pre-push] 检测到 deploy/ 改动，校验 compose 配置（R3）..."
+    if command -v docker >/dev/null 2>&1 && docker compose version >/dev/null 2>&1; then
+        for f in deploy/docker-compose*.yml; do
+            [ -e "$f" ] || continue
+            if ! docker compose -f "$f" config >/dev/null; then
+                echo "[pre-push] $f 配置校验失败"
+                exit 1
+            fi
+        done
+        echo "[pre-push] compose 配置语法通过；云端请补跑 verify-cloud.sh"
+    else
+        echo "[pre-push] 本机无 docker compose，跳过语法校验；云端务必跑 verify-cloud.sh"
+    fi
+fi
+
+echo "[pre-push] 全部通过"
+exit 0

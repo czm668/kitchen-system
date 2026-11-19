@@ -58,7 +58,7 @@ def _clip(value: Any, limit: int) -> str | None:
     return text[:limit]
 
 
-class SqliteRecorder(BusinessRecorderMixin):
+class RuntimeRecorder(BusinessRecorderMixin):
     """运行时库写入器（类名保留兼容，实际支持 SQLite / MySQL）。`close()` 幂等。
 
     `target` 为文件路径时用 SQLite（默认，A1 行为不变）；为
@@ -217,12 +217,13 @@ class SqliteRecorder(BusinessRecorderMixin):
         with self._lock:
             self.conn.close()
 
-    def __enter__(self) -> "SqliteRecorder":
+    def __enter__(self) -> "RuntimeRecorder":
         return self
 
     def __exit__(self, *exc: Any) -> None:
         self.close()
 
 
-#: 语义更准的别名；保留 SqliteRecorder 是为了不破坏既有导入与单测。
-RuntimeRecorder = SqliteRecorder
+#: 旧名保留兼容一版（审查报告 §3）：新代码一律用 RuntimeRecorder。
+#: 类名不再暗示只支持 SQLite（实际 SQLite / MySQL 双后端）。
+SqliteRecorder = RuntimeRecorder

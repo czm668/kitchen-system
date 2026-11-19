@@ -17,9 +17,9 @@
 ## 用法
 
 ```
-python tools/compliance_demo.py
-python tools/compliance_demo.py --quiet          # 只打印关键结论
-python tools/compliance_demo.py --png out.png    # 把溯源码标签写到文件
+python tools/demos/compliance_demo.py
+python tools/demos/compliance_demo.py --quiet          # 只打印关键结论
+python tools/demos/compliance_demo.py --png out.png    # 把溯源码标签写到文件
 ```
 """
 from __future__ import annotations
@@ -30,7 +30,7 @@ import sys
 from datetime import datetime, timedelta
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 
 from kitchen.domain import CST                                      # noqa: E402
 from kitchen.process import (                                       # noqa: E402

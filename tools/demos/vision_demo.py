@@ -18,9 +18,9 @@
 ## 用法
 
 ```
-python tools/vision_demo.py
-python tools/vision_demo.py --quiet                 # 只打印结论
-python tools/vision_demo.py --evidence var/evidence
+python tools/demos/vision_demo.py
+python tools/demos/vision_demo.py --quiet                 # 只打印结论
+python tools/demos/vision_demo.py --evidence var/evidence
 ```
 """
 from __future__ import annotations
@@ -32,7 +32,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 
 from kitchen.domain import CST                                        # noqa: E402
 from kitchen.process import (                                        # noqa: E402

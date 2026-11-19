@@ -5,6 +5,11 @@ description = "基于 ESP32 的后厨智能调度与食安合规管理系统 - �
 requires-python = ">=3.11"
 dependencies = []
 
+# 唯一生产入口（审查报告 §3 "入口泛滥" P0）：装了本包后 `kitchen` 直接起
+# API + 同源静态前端。tools/demos/ 下的是离线演示脚本，不是服务入口。
+[project.scripts]
+kitchen = "kitchen.api.server:main"
+
 [project.optional-dependencies]
 test = ["pytest>=7.0"]
 # A2 MQTT 真链路：不装也能跑（Inproc 进程内通道覆盖全部代码路径），

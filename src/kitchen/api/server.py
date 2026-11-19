@@ -62,6 +62,17 @@ SSE_PING_SEC = 15.0
 #: 令牌在 URL 里出现时不要进访问日志（日志会被截图进论文，泄漏令牌很蠢）
 _REDACT_KEYS = ("token", "password", "card_uid")
 
+#: 绕过 Router JSON 包装的二进制/SSE 端点（审查报告 §3）：以前注释写"唯一"，
+#: 实际有 4 个且散落在 do_GET/do_POST 里，新人不知道新增该走哪条路。
+#: 新增端点只在这里加一行；值 = (Handler 方法名, 是否把 query 传进去)。
+#: 语义：都在 `if path.startswith("/api/")` 之前命中，且都不走登录态。
+_BINARY_ENDPOINTS: dict[tuple[str, str], tuple[str, bool]] = {
+    ("GET", "/api/stream"): ("_stream", True),
+    ("GET", "/api/customer/trace/label.png"): ("_trace_label", True),
+    ("GET", "/api/customer/guest/evidence-image"): ("_evidence_image", True),
+    ("POST", "/api/customer/guest/evidence-upload"): ("_evidence_upload", False),
+}
+
 
 class _HttpServer(ThreadingHTTPServer):
     """带一个 Windows 专属修正的 HTTP 服务。
@@ -305,17 +316,12 @@ def _make_handler(server: ApiServer):
         def do_GET(self) -> None:  # noqa: N802
             parsed = urlparse(self.path)
             query = parse_qs(parsed.query, keep_blank_values=True)
-            if parsed.path == "/api/stream":
-                self._stream(query)
-                return
-            # A9-05 溯源标签：唯一的二进制端点。绕过 Router 的 JSON 包装，
-            # 直接从 TraceService 拿 PNG 字节（匿名：标签本身就要让顾客扫）
-            if parsed.path == "/api/customer/trace/label.png":
-                self._trace_label(query)
-                return
-            # 客诉图片证据：二进制端点，绕过 Router 的 JSON 包装
-            if parsed.path == "/api/customer/guest/evidence-image":
-                self._evidence_image(query)
+            # 二进制 / SSE 端点统一在 _BINARY_ENDPOINTS 注册，绕过 Router 的
+            # JSON 包装（溯源 PNG、客诉图片、事件流都不是 JSON）。匿名可达。
+            binary = _BINARY_ENDPOINTS.get(("GET", parsed.path))
+            if binary is not None:
+                handler, with_query = binary
+                getattr(self, handler)(query) if with_query else getattr(self, handler)()
                 return
             if parsed.path.startswith("/api/"):
                 session = self._session(query)
@@ -329,9 +335,14 @@ def _make_handler(server: ApiServer):
             self._static(parsed.path)
 
         def do_POST(self) -> None:  # noqa: N802
-            # 客诉图片上传：二进制 body，不走 JSON Router。
-            if urlparse(self.path).path == "/api/customer/guest/evidence-upload":
-                self._evidence_upload()
+            # 二进制 body 上传同样从 _BINARY_ENDPOINTS 注册，不走 JSON Router。
+            binary = _BINARY_ENDPOINTS.get(("POST", urlparse(self.path).path))
+            if binary is not None:
+                handler, with_query = binary
+                if with_query:
+                    getattr(self, handler)(parse_qs(urlparse(self.path).query))
+                else:
+                    getattr(self, handler)()
                 return
             self._mutate("POST")
 

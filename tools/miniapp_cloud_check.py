@@ -23,6 +23,16 @@
 默认只读：不动任何业务数据，随时可跑（答辩前跑一遍最省事）。加 `--write`
 会在云端**真下一单**（打印 order_no 与清理 SQL），用来验证 MySQL 自增、
 沽清校验、限频 429 和 LLM 是否真的活着。
+
+延迟口径（R6，审查报告缺陷 #13）：从开发机出网时 p100 偶发 3.57s，而同时段
+服务器本机只有 0.9–1.6ms。只打外网会把开发机网络抖动误报成服务端回归。
+所以轮询检查支持两端对照：
+
+    python tools/miniapp_cloud_check.py --self-host http://127.0.0.1   # 在服务器上跑，现场打两端
+    python tools/miniapp_cloud_check.py --self-host-json baseline.json  # 开发机读预采样本
+
+外部超 1s 但本机健康 → 判 `network_jitter`（不算回归）；两端都慢 → `server_slow`。
+不给基线时退化为旧口径，并在明细里注明「无法区分抖动来源」。
 """
 from __future__ import annotations
 
@@ -45,6 +55,55 @@ DEMO_TRACE_CODE = "TC-DEMO-0001"
 
 #: 客服对话的可能意图（后端 guest/llm.py），只做「是不是这几个之一」的粗校验
 CHAT_INTENTS = {"urge", "order_query", "menu_query", "chitchat", "complaint"}
+
+#: 订单轮询红线：前端 2s 一次，超过 1s 就会越轮越积压（见审查报告缺陷 #13）
+POLL_P100_LIMIT_MS = 1000.0
+#: 服务器本机基线被视为「服务端健康」的 p100。外部慢但本机低于此值 → 判为开发机出网抖动。
+SELF_HOST_HEALTHY_MS = 200.0
+
+
+def classify_poll_latency(external_ms: list[float],
+                          self_host_ms: list[float] | None) -> tuple[bool, str, str]:
+    """按 R6 规则做两端对照，返回 `(是否通过, 归因, 明细)`。
+
+    审查报告缺陷 #13：从开发机出网时 p100 偶发 3.57s，同时段服务器本机只有
+    0.9–1.6ms。只看外部延迟会把开发机网络抖动误报成「服务端回归」。规则：
+
+    - 外部 p100 < 红线 → 通过，归因 `ok`；
+    - 外部超红线、但本机基线健康 → **通过**，归因 `network_jitter`；
+    - 两端都超红线 → 失败，归因 `server_slow`（真回归）；
+    - 没有基线 → 退化为旧口径（外部超红线即失败），归因 `no_baseline`，
+      并在明细里明说「无法区分抖动来源」，提醒补基线。
+
+    抽成纯函数是为了能单测三种归因，不必真的连云端。
+    """
+    ext = [float(x) for x in external_ms]
+    ext_p100 = max(ext) if ext else 0.0
+    ext_p50 = statistics.median(ext) if ext else 0.0
+    if self_host_ms is None:
+        ok = ext_p100 < POLL_P100_LIMIT_MS
+        return ok, "no_baseline", (
+            f"外部 p50={ext_p50:.0f}ms p100={ext_p100:.0f}ms"
+            "（无本机基线，无法区分是出网抖动还是服务端回归）")
+    local = [float(x) for x in self_host_ms]
+    local_p100 = max(local) if local else 0.0
+    local_p50 = statistics.median(local) if local else 0.0
+    detail = (f"外部 p50={ext_p50:.0f}ms p100={ext_p100:.0f}ms / "
+              f"本机 p50={local_p50:.0f}ms p100={local_p100:.0f}ms")
+    if ext_p100 < POLL_P100_LIMIT_MS:
+        return True, "ok", detail + "（两端达标）"
+    if local_p100 < SELF_HOST_HEALTHY_MS:
+        return True, "network_jitter", detail + " → 判为开发机出网抖动，非服务端回归（R6）"
+    return False, "server_slow", detail + " → 本机也慢，真服务端回归，需排查"
+
+
+def load_self_host_samples(path: str) -> list[float]:
+    """读预采集的服务器本机基线：纯数组或 `{"samples_ms": [...]}`。"""
+    raw = json.loads(Path(path).read_text(encoding="utf-8"))
+    seq = raw.get("samples_ms") if isinstance(raw, dict) else raw
+    if not isinstance(seq, (list, tuple)):
+        raise ValueError("基线 JSON 必须是数组或含 samples_ms 数组的对象")
+    return [float(x) for x in seq]
 
 
 class Report:
@@ -135,8 +194,14 @@ class Client:
 
 
 # ------------------------------------------------------------------ 只读体检
-def check_readonly(c: Client, rep: Report, table_id: int) -> tuple[str, str, dict]:
-    """返回 (token, guest_key, menu_data)，给 --write 阶段复用。"""
+def check_readonly(c: Client, rep: Report, table_id: int,
+                   baseline_client: "Client | None" = None,
+                   baseline_samples: "list[float] | None" = None) -> tuple[str, str, dict]:
+    """返回 (token, guest_key, menu_data)，给 --write 阶段复用。
+
+    `baseline_client` / `baseline_samples` 二选一提供服务器本机基线（R6）：
+    前者现场打同一个接口，后者读预采样本。都为空则退化为只看外部延迟。
+    """
     guest_key = f"cloudcheck-{int(time.time())}"
 
     print("\n[1] 匿名探活（页面打开第一件事）")
@@ -221,9 +286,21 @@ def check_readonly(c: Client, rep: Report, table_id: int) -> tuple[str, str, dic
         _, _, ms = c.call("GET", "/api/customer/orders", token=token)
         lat.append(ms)
         time.sleep(0.2)
-    p95 = max(lat)
-    rep.check(p95 < 1000, "订单轮询 p100 < 1s（不会越轮越积压）",
-              f"p50={statistics.median(lat):.0f}ms p100={p95:.0f}ms")
+    # R6：外部延迟必须和服务器本机基线一起看，抖动归因先比两端。
+    self_lat = list(baseline_samples) if baseline_samples is not None else None
+    if self_lat is None and baseline_client is not None:
+        self_lat = []
+        for _ in range(len(lat)):
+            try:
+                _, _, ms = baseline_client.call("GET", "/api/customer/orders", token=token)
+                self_lat.append(ms)
+            except RuntimeError as err:
+                print(f"  基线采集失败（{err}），本项退化为无基线口径")
+                self_lat = None
+                break
+            time.sleep(0.2)
+    ok, cause, detail = classify_poll_latency(lat, self_lat)
+    rep.check(ok, f"订单轮询 p100（R6 两端对照，归因={cause}）", detail)
     return token, guest_key, menu
 
 
@@ -279,6 +356,10 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--table", type=int, default=3, help="开桌桌号，默认 3")
     ap.add_argument("--write", action="store_true", help="加跑下单/催菜/客服对话（会留真实订单）")
     ap.add_argument("--timeout", type=float, default=15.0, help="单请求超时秒数")
+    ap.add_argument("--self-host", default="",
+                    help="服务器本机基线地址（如 http://127.0.0.1），与外部同时采样做 R6 对照")
+    ap.add_argument("--self-host-json", default="",
+                    help="预采集的本机基线样本 JSON（纯数组或 {\"samples_ms\": [...]}），无需现场连服务器")
     args = ap.parse_args(argv)
 
     cfg = config_base_url()
@@ -290,10 +371,26 @@ def main(argv: list[str] | None = None) -> int:
         print(f"注意：代码包里的 BASE_URL={cfg}，本次验的是 {base}（真机会打前者）")
 
     print(f"目标 {base}   桌号 {args.table}   模式 {'读写' if args.write else '只读'}")
+
+    baseline_client = None
+    baseline_samples = None
+    if args.self_host and args.self_host_json:
+        print("注意：--self-host 与 --self-host-json 同时给了，优先用预采样本")
+    if args.self_host_json:
+        try:
+            baseline_samples = load_self_host_samples(args.self_host_json)
+            print(f"本机基线：读预采样本 {args.self_host_json}（{len(baseline_samples)} 个）")
+        except (OSError, ValueError, json.JSONDecodeError) as err:
+            print(f"基线样本读取失败（{err}），本项退化为无基线口径")
+    elif args.self_host:
+        baseline_client = Client(args.self_host, timeout=args.timeout)
+        print(f"本机基线：现场打 {args.self_host.rstrip('/')}（R6 两端对照）")
+
     c = Client(base, timeout=args.timeout)
     rep = Report()
     try:
-        token, guest_key, menu = check_readonly(c, rep, args.table)
+        token, guest_key, menu = check_readonly(
+            c, rep, args.table, baseline_client, baseline_samples)
     except RuntimeError as err:
         print(f"\n[FAIL] {err}")
         print("排查顺序：云端服务是否在跑 → 安全组/防火墙是否放行 80 → "

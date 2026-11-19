@@ -69,7 +69,7 @@ from ..runtime import KitchenRuntime
 from ..staff.admission import AdmissionController, CertificateSweeper, StaffMatcherAdapter
 from ..staff.duty import DutyGuard
 from ..staff.repository import MemoryStaffRepository
-from ..storage.recorders import SqliteRecorder
+from ..storage.recorders import RuntimeRecorder
 from .audit import AuditLog
 from .customer import CustomerService
 
@@ -248,15 +248,15 @@ class AppState:
         # db_path 指向 SQLite 文件即启用遥测/告警落库；db_url（mysql://）优先，
         # 走 MySQL 后端。写失败只计数不抛——落库是锦上添花，
         # 不能把采样线程打挂（口径同 AuditLog.write_failures）。
-        self.recorder: SqliteRecorder | None = None
+        self.recorder: RuntimeRecorder | None = None
         if self.config.db_url:
             # MySQL：URL 里带口令，绝不落日志；连接失败由 backend 直接抛出
-            self.recorder = SqliteRecorder(
+            self.recorder = RuntimeRecorder(
                 self.config.db_url, device_id=self.config.device_id
             )
         elif self.config.db_path is not None:
             self.config.db_path.parent.mkdir(parents=True, exist_ok=True)
-            self.recorder = SqliteRecorder(
+            self.recorder = RuntimeRecorder(
                 self.config.db_path, device_id=self.config.device_id
             )
 
@@ -350,18 +350,18 @@ class AppState:
         from ..ai import AiService
         self.ai = AiService(self, provider=self.llm_provider)
         self.duty = DutyGuard(
-            self.admission, clock=self.now, wall_clock=self.to_datetime
+            self.admission, clock=self.monotonic, wall_clock=self.to_datetime
         )
 
         # ---------------------------------------------------------- 安全链路
         self.runtime = KitchenRuntime(
             load_builtin() if rules is None else rules,
             device_id=self.config.device_id,
-            wall_clock=self.wall,
+            wall_clock=self.wall_epoch,
         )
         self.supervisor = InterlockSupervisor()
         self.controller: InterlockController = self.supervisor.controller
-        self.health = SensorHealthMonitor(clock=self.wall)
+        self.health = SensorHealthMonitor(clock=self.wall_epoch)
 
         # 队列与补传：var_dir 没给就落系统临时目录下的固定子目录，
         # **不用 tempfile.mkdtemp()**（本机 TEMP 是 8.3 短名，不可写）
@@ -370,7 +370,7 @@ class AppState:
         self.store = MemoryOfflineStore()
         self.queue = LocalQueue(
             queue_dir / "queue.jsonl", device_id=self.config.device_id,
-            capacity=self.config.queue_capacity, wall_clock=self.wall,
+            capacity=self.config.queue_capacity, wall_clock=self.wall_epoch,
         )
         self.uploader = ReplayUploader(
             self.queue, self.store, device_id=self.config.device_id
@@ -386,12 +386,12 @@ class AppState:
             )),
             health=self.health,
             online=self._online,
-            clock=self.now,
-            wall_clock=self.wall,
+            clock=self.monotonic,
+            wall_clock=self.wall_epoch,
         )
         self.telemetry = TelemetryRing(self.config.history_points)
         self.audit = AuditLog(
-            None if var is None else var / "audit.jsonl", clock=self.wall,
+            None if var is None else var / "audit.jsonl", clock=self.wall_epoch,
             sql_sink=None if self.recorder is None else self.recorder.append_audit,
         )
         # 演示数据：订单、消毒会话、工单。单独一步，方便测试只装空壳
@@ -435,16 +435,18 @@ class AppState:
             self.start()
 
     # ---------------------------------------------------------------- 时间
-    def now(self) -> float:
-        """单调秒（从启动起算，**不受 time_scale 影响**）。"""
+    # R5（审查报告 §3/§5.3）：两个时间轴必须用名字区分，不再叫 now/wall。
+    # 11-18 的告警刷屏正是把单调秒当 epoch 传进 due_escalations 造成的。
+    def monotonic(self) -> float:
+        """单调秒（从启动起算，**不受 time_scale 影响**）。只用于计时/超时。"""
         return time.monotonic() - self._t0
 
-    def wall(self) -> float:
-        """加速后的 epoch 秒。展示与业务域用这个。"""
-        return self._wall_base + self.now() * self.config.time_scale
+    def wall_epoch(self) -> float:
+        """加速后的 epoch 秒。展示、落库与业务时间戳用这个。"""
+        return self._wall_base + self.monotonic() * self.config.time_scale
 
     def to_datetime(self) -> datetime:
-        return datetime.fromtimestamp(self.wall(), CST)
+        return datetime.fromtimestamp(self.wall_epoch(), CST)
 
     def set_time_scale(self, scale: float) -> dict[str, Any]:
         """改加速因子。**要把已经流逝的时间按旧因子结清**，否则历史会被重算。"""
@@ -452,8 +454,8 @@ class AppState:
         if scale <= 0:
             raise ValueError("time_scale 必须为正")
         with self._lock:
-            elapsed = self.now()
-            self._wall_base = self.wall() - elapsed * scale
+            elapsed = self.monotonic()
+            self._wall_base = self.wall_epoch() - elapsed * scale
             self.config.time_scale = scale
             # `GuardPolicy` 是 frozen dataclass：**整体替换**而不是改字段。
             # 只换 policy 对象、保留 guards 实例，触发状态（燃气基线、长烧计时）
@@ -465,18 +467,25 @@ class AppState:
             return self.demo_map()
 
     def demo_map(self) -> dict[str, Any]:
-        """A7-09 要求：**演示阈值与真实值的对应关系可查**（答辩防质疑）。"""
+        """A7-09 要求：**演示阈值与真实值的对应关系可查**（答辩防质疑）。
+
+        静态时长来自 fixtures/kitchen_constants.json（审查报告 §3 P2）；
+        长烧时长是运行期配置 `flame_hold_sec`，不写死在常量表里。
+        """
+        from ..constants import constants as _constants
+
         scale = self.config.time_scale
         policy = self.offline.guards.policy
+        conf = _constants()
+        specs = [(row["label"], float(row["real_sec"]), row["note"])
+                 for row in conf["demo_durations"]]
+        # 长烧项由运行期配置决定，按 JSON 里的 insert_at 插回原顺序
+        insert_at = int(conf.get("demo_durations_insert_at", len(specs)))
+        specs.insert(insert_at, (
+            "#3 长烧无人看管", self.config.flame_hold_sec,
+            "设计值：60 分钟无刷卡/按键 → 关气源"))
         rows = []
-        for label, real_sec, note in (
-            ("#3 明火离人确认", 12.0, "设计值：火焰持续 12 秒无人 → 关气 + 播报"),
-            ("#1 燃气确认窗口", 30.0, "设计值：连续超限 30 秒 → 关阀"),
-            ("#3 长烧无人看管", self.config.flame_hold_sec,
-             "设计值：60 分钟无刷卡/按键 → 关气源"),
-            ("#15 消毒达标累计", 3600.0, "设计值：100~120℃ 累计 60 分钟"),
-            ("#6 留样时限", 48 * 3600.0, "设计值：留样保存 48 小时"),
-        ):
+        for label, real_sec, note in specs:
             effective = real_sec / scale if scale > 1 else real_sec
             rows.append({
                 "item": label,
@@ -541,10 +550,10 @@ class AppState:
     def tick(self, metrics: Mapping[str, float] | None = None) -> StepResult:
         """推进一帧。`metrics` 为空时用仿真档位采样（演示/联调用的就是这条路）。"""
         with self._lock:
-            moment = self.now()
+            moment = self.monotonic()
             frame = dict(metrics) if metrics is not None else self.demo.frame(moment)
             step = self.offline.tick(frame, now=moment)
-            self.telemetry.push(self.wall(), frame)
+            self.telemetry.push(self.wall_epoch(), frame)
             if self.recorder is not None:
                 self.recorder.record_frame(frame, self.to_datetime())
             self._ticks += 1
@@ -565,15 +574,15 @@ class AppState:
                 "rule_id": verdict.rule_id, "event": verdict.event,
                 "message": verdict.message, "actions": list(verdict.actions),
             })
-        # 工单时间戳是 `self.now()`（单调秒，见 offline.tick → health.observe），
+        # 工单时间戳是 `self.monotonic()`（单调秒，见 offline.tick → health.observe），
         # 升级判定必须用同一个时钟域。两个坑都踩过（2026-11-18 云端实测）：
-        # 1. 传 `self.wall()`（epoch）→ `now >= due_at + 900` 永远成立，工单一开
+        # 1. 传 `self.wall_epoch()`（epoch）→ `now >= due_at + 900` 永远成立，工单一开
         #    就立刻「超时升级」，超期时长还会算出几千万分钟的荒谬值；
         # 2. 只发事件不调 `escalate()` → `escalated_at` 一直是 None，
         #    `is_due_for_escalation` 每帧都成立，同一张单每秒发 3 行进
         #    `alarm_events`，跑一天 26 万行，30 GB 盘迟早撑爆。
         # 正确语义：开单 30 分钟没人接单 → 升级一次（L1→L2），之后不再重复。
-        moment = self.now()
+        moment = self.monotonic()
         for ticket in self.health.due_escalations(now=moment):
             self.health.escalate(ticket.id, now=moment)
             self._emit("fault-escalate", ticket.to_payload())
@@ -583,7 +592,7 @@ class AppState:
         row = {
             "seq": self._event_seq,
             "kind": kind,
-            "ts": round(self.wall(), 3),
+            "ts": round(self.wall_epoch(), 3),
             "time": self.to_datetime().strftime("%H:%M:%S"),
             **body,
         }
@@ -630,7 +639,7 @@ class AppState:
 
     # ---------------------------------------------------------------- 网络
     def set_online(self, online: bool) -> dict[str, Any]:
-        report = self.offline.set_online(online, now=self.wall())
+        report = self.offline.set_online(online, wall_epoch=self.wall_epoch())
         self._online = bool(online)
         self._emit("network", {"online": self._online,
                                "queued": len(self.queue)})
@@ -660,7 +669,7 @@ class AppState:
         return {
             "device_id": self.config.device_id,
             "server_time": self.to_datetime().isoformat(timespec="seconds"),
-            "epoch": round(self.wall(), 3),
+            "epoch": round(self.wall_epoch(), 3),
             "time_scale": self.config.time_scale,
             "online": self._online,
             "ticks": self._ticks,
@@ -701,7 +710,7 @@ class AppState:
             sensor_faults=list(self.health.faulty()),
             config_degraded=bool(self.runtime.config.degraded),
             queue_pending=len(self.queue),
-            now=self.wall(),
+            wall_epoch=self.wall_epoch(),
         ).to_payload()
 
     def channel_action(
@@ -762,9 +771,9 @@ class AppState:
                 "vision_online": self.config.vision_online,
             },
             "runtime": self.runtime.snapshot(),
-            "offline": self.offline.snapshot(now=self.now()),
+            "offline": self.offline.snapshot(now=self.monotonic()),
             "queue": self.queue.snapshot() if hasattr(self.queue, "snapshot") else {},
-            "health": self.health.snapshot(now=self.now()),
+            "health": self.health.snapshot(now=self.monotonic()),
             "audit": self.audit.snapshot(),
             "ticks": self._ticks,
             "online": self._online,

@@ -420,12 +420,12 @@ class SensorHealthMonitor:
 
     def close(
         self, ticket_id: int, *, reviewer: str = "", note: str = "",
-        now: float | None = None,
+        wall_epoch: float | None = None,
     ) -> FaultTicket:
         ticket = self._require(ticket_id)
         if ticket.state == "closed":
             return ticket
-        moment = float(self._clock() if now is None else now)
+        moment = float(self._clock() if wall_epoch is None else wall_epoch)
         ticket.state = "closed"
         ticket.closed_at = moment
         if reviewer:

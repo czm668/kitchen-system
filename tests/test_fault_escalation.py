@@ -4,8 +4,8 @@
 云端上线半小时后巡检发现：`alarm_events` 25 分钟涨到 4729 行，全是同 6 张
 卡死工单反复升级。链路上有两个独立缺陷，单看单元测试都看不出来：
 
-1. **时钟域不一致**：工单的 `opened_at / due_at` 是 `state.now()`（单调秒），
-   而 `_collect` 用 `state.wall()`（epoch）去判 `due_escalations`。
+1. **时钟域不一致**：工单的 `opened_at / due_at` 是 `state.monotonic()`（单调秒），
+   而 `_collect` 用 `state.wall_epoch()`（epoch）去判 `due_escalations`。
    `now >= due_at + 900` 对 epoch 永远成立 → 工单一开就地「超时」，
    升级说明里还会算出「超期 2988 万分钟」这种荒谬值。
 2. **只发事件不升级**：`due_escalations()` 是只读查询，`escalated_at` 要靠
@@ -65,13 +65,13 @@ def test_卡死工单超时升级只发一次(tmp_path):
         assert ticket.opened_at < 1e6
 
         # ② 未到升级点：不发事件，等级不动
-        state.now = lambda: ticket.due_at + 899.0
+        state.monotonic = lambda: ticket.due_at + 899.0
         _collect(state, frame)
         assert _escalations(state, ticket.id) == []
         assert ticket.level == 1
 
         # ③ 到点：正好发一条，等级 L1→L2，escalated_at 落上
-        state.now = lambda: ticket.due_at + 900.0
+        state.monotonic = lambda: ticket.due_at + 900.0
         _collect(state, frame)
         rows = _escalations(state, ticket.id)
         assert len(rows) == 1
@@ -81,7 +81,7 @@ def test_卡死工单超时升级只发一次(tmp_path):
 
         # ④ 回归点：再推 10 帧不许重复发（就是云端每秒 3 行的那条路）
         for extra in range(1, 11):
-            state.now = lambda e=extra: ticket.due_at + 900.0 + e
+            state.monotonic = lambda e=extra: ticket.due_at + 900.0 + e
             _collect(state, frame)
         assert len(_escalations(state, ticket.id)) == 1, "升级事件重复发出"
     finally:
