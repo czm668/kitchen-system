@@ -145,7 +145,7 @@
     "presentation_rule": "答辩/论文主动说明 4 类有验证集、uniform 与 phone 无独立验证样本；不得声称 6 类全部通过验证，也不得靠加类别掩盖。",
     "improvement_path": [
       "（已完成 2026-11-19）补 phone：train 59 框 + val 21 框，COCO 教师伪标注 + 人工逐框目检裁决",
-      "（进行中）kitchen-v2-phone：从 weights/kitchen.pt 微调 15 轮（lr0=0.002，imgsz=416 不变），A/B 通过才替换权重：判据=原 4 类 mAP 不明显回退且 phone AP 明显非零",
+      "（未通过发布门禁 2026-11-19）kitchen-v2-phone：从 weights/kitchen.pt 微调（lr0=0.002，imgsz=416 不变），早停于第 6 轮、最佳第 1 轮；v2 口径 val（3484 图/21 phone 框）结果：原 4 类 mAP50=0.884/0.951/0.897/0.960（均值 0.923≥0.62 ✓）但 phone AP50=0.0<0.30 ✗——判据不通过，v1 保留为生产权重，v2 留档 runs/vision/kitchen-v2-phone 不发布。根因：59 个 train phone 框摊在 21164 张图里类信号太弱，微调学不动一个几乎缺席的类；出路是更多 phone 标注或更高分辨率，不是再训几轮",
       "uniform：现数据集无工服实例，需厨房场景图像或'反光背心↦uniform'语义决策后再标",
       "重跑 tools/vision_train.py 生成的命令更新 var/train.log 与本文件"
     ],
@@ -164,6 +164,25 @@
         "mAP50-95": 0.63769,
         "mAP50": 0.92181,
         "verdict": "下降，不采用——小目标场景翻转增强不利"
+      },
+      "v2_finetune_eval": {
+        "date": "2026-11-19",
+        "run": "runs/vision/kitchen-v2-phone",
+        "protocol": "val 真值并入 21 个 phone 框后的 5 类口径（3484 图，phone 20 图 21 框）",
+        "release_criteria": "原 4 类 mAP50>=0.62 且 phone AP50>=0.30（训练前预声明，防事后挑数）",
+        "per_class_mAP50": {
+          "person": 0.884,
+          "hat": 0.951,
+          "mask": 0.897,
+          "cigarette": 0.960,
+          "phone": 0.0
+        },
+        "all_mAP50": 0.738,
+        "all_mAP50_95": 0.499,
+        "early_stopping": "第 6 轮停（patience=5），最佳第 1 轮",
+        "verdict": "phone AP50=0.0 未达 0.30，判据不通过；v1 权重保留为生产权重（weights/kitchen.pt），v2 best.pt 留档不发布",
+        "diagnosis": "59 个 train phone 框 / 21164 图（0.28%）类信号过弱，微调无法学会一个几乎缺席的类；phone 输出在本 val 上无任何 TP（P=R=AP=0），说明模型基本不再输出 phone 预测，而非定位偏移",
+        "next": "出路在数据侧：补更多 phone 标注（含厨房场景实拍），或用更大教师/更高分辨率专项训练 phone 检测头；当前 kitchen 补集管线 tools/vision_kitchen_merge.py 已就绪"
       },
       "full_retrain_cost": "单轮约 6.5 分钟(imgsz416/batch16/21164 图)，80 轮 8+ 小时；更大预训练权重 GitHub/HF 均被代理拦截，无法下载。",
       "root_cause": "提升天花板在数据：uniform/phone 零标注、cigarette 仅 679 张。换模型/调参变不出缺失类别的 AP。"
