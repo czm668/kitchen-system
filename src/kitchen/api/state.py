@@ -344,6 +344,11 @@ class AppState:
             self, provider=self.llm_provider,
             journal_path=None if var is None else var / "compliance_journal.jsonl",
         )
+        # A28 多融合 AI 中枢（只读建议层）：与上面三域共用同一个 provider 实例，
+        # 配 key 后 anomaly/dispatch/compliance_qa 三场景一起切 live；无 key 走
+        # 各自的确定性离线规则。它不持有业务状态、不写业务表，摘掉不影响主链路。
+        from ..ai import AiService
+        self.ai = AiService(self, provider=self.llm_provider)
         self.duty = DutyGuard(
             self.admission, clock=self.now, wall_clock=self.to_datetime
         )

@@ -52,7 +52,7 @@ from typing import Any, Mapping, Protocol
 __all__ = [
     "PROMPT_VERSION", "CATEGORIES", "SENTIMENTS", "TAGS", "COMPENSATIONS",
     "COMPENSATION_LABELS",
-    "LLMError", "LLMUnavailable", "LLMParseError", "AiResult",
+    "LLMError", "LLMUnavailable", "LLMParseError", "AiResult", "AdvSpec",
     "RuleProvider", "DeepSeekProvider", "make_provider", "run_guarded",
     "sanitize_user_text", "validate_payload", "llm_run_row",
 ]
@@ -131,6 +131,25 @@ class LLMParseError(LLMError):
 
 
 @dataclass(frozen=True)
+class AdvSpec:
+    """通用建议场景规格：把"场景专属配置"收敛成一个可注入对象。
+
+    多融合 AI 的新场景（异常归因 / 派单建议 / 合规问答）复用同一套 provider、
+    护栏、审计，只替换四样东西：自定义 system 提示词、分类白名单、标签白名单、
+    离线规则函数。`run_guarded` / `validate_payload` 拿到它就知道怎么处理，
+    **底层 llm.py 不需要 import 任何业务域**，依赖关系保持单向。
+
+    `rule(facts) -> dict` 必须是确定性的：在线失败时用它降级，断网也能出结论。
+    """
+    scenario: str
+    prompt_version: str
+    system_prompt: str
+    categories: tuple[str, ...]
+    tags: tuple[str, ...] = ()
+    rule: Any = None  # Callable[[Mapping[str, Any]], dict[str, Any]]
+
+
+@dataclass(frozen=True)
 class AiResult:
     """AI 输出。**没有 approve/decision/amount 字段**——这是刻意的结构约束。"""
     scenario: str
@@ -172,22 +191,27 @@ def sanitize_user_text(text: Any, limit: int = 500) -> tuple[str, bool]:
     return clean, bool(_INJECTION_RE.search(clean))
 
 
-def validate_payload(payload: Any, scenario: str) -> dict[str, Any]:
+def validate_payload(payload: Any, scenario: str,
+                     spec: AdvSpec | None = None) -> dict[str, Any]:
     """严格 schema 校验：任何越界都抛 `LLMParseError`，交给上层降级。
 
     不做「尽量修复」——把模型乱输出的 category 悄悄改成「其他」会让错误
     永远不被发现，演示时看着正常，实际分类全错。
+
+    `spec` 给定时用场景专属白名单（分类/标签），否则用客服默认白名单。
     """
     if not isinstance(payload, dict):
         raise LLMParseError("输出不是 JSON 对象")
     category = payload.get("category")
     sentiment = payload.get("sentiment")
-    if category not in CATEGORIES:
+    categories = spec.categories if spec is not None else CATEGORIES
+    tags_whitelist = spec.tags if spec is not None else TAGS
+    if category not in categories:
         raise LLMParseError(f"category 越界：{category!r}")
     if sentiment not in SENTIMENTS:
         raise LLMParseError(f"sentiment 越界：{sentiment!r}")
     tags = payload.get("tags") or []
-    if not isinstance(tags, (list, tuple)) or any(t not in TAGS for t in tags):
+    if not isinstance(tags, (list, tuple)) or any(t not in tags_whitelist for t in tags):
         raise LLMParseError(f"tags 含白名单外标签：{tags!r}")
     summary = str(payload.get("summary") or "")[:300]
     reply = str(payload.get("reply") or "")[:300]
@@ -229,8 +253,14 @@ class LLMProvider(Protocol):
     mode: str
     model: str
 
-    def complete(self, scenario: str, facts: Mapping[str, Any]) -> dict[str, Any]:
-        """返回待校验的原始 dict。失败抛 `LLMError` 子类。"""
+    def complete(self, scenario: str, facts: Mapping[str, Any], *,
+                 system_prompt: str | None = None) -> dict[str, Any]:
+        """返回待校验的原始 dict。失败抛 `LLMError` 子类。
+
+        `system_prompt` 给"非客服"场景（异常归因 / 派单建议 / 合规问答）覆盖
+        默认客服提示词。不传时行为完全不变——guest / finance / compliance 三个
+        既有域都走默认值，这是新增场景不动老链路的关键。
+        """
         ...
 
 
@@ -249,7 +279,10 @@ class RuleProvider:
         ("菜品质量", ("难吃", "咸", "淡", "糊", "生", "不熟", "变味", "馊")),
     )
 
-    def complete(self, scenario: str, facts: Mapping[str, Any]) -> dict[str, Any]:
+    def complete(self, scenario: str, facts: Mapping[str, Any], *,
+                 system_prompt: str | None = None) -> dict[str, Any]:
+        # system_prompt 在离线层被忽略：规则层用确定性逻辑回答，不查模型，
+        # 也就不存在「用哪个提示词」的问题。保留参数只为与在线层同签名。
         if scenario == "profile":
             return self._profile(facts)
         return self._support(facts)
@@ -361,20 +394,30 @@ class DeepSeekProvider:
                             urllib.request.build_opener(
                                 urllib.request.ProxyHandler({})))
 
-    def complete(self, scenario: str, facts: Mapping[str, Any]) -> dict[str, Any]:
-        user = {
-            "scenario": scenario,
-            "tag_whitelist": list(TAGS),
-            "categories": list(CATEGORIES),
-            "facts": {k: v for k, v in facts.items()
-                      if k not in ("customer_token", "openid", "phone", "guest_key")},
-            "user_text": f"<<<USER_TEXT>>>\n{facts.get('text', '')}\n<<<END_USER_TEXT>>>",
-        }
+    def complete(self, scenario: str, facts: Mapping[str, Any], *,
+                 system_prompt: str | None = None) -> dict[str, Any]:
+        # 隐私护栏：与客服场景同一份过滤名单，新场景同样不喂 openid/手机号。
+        safe_facts = {k: v for k, v in facts.items()
+                      if k not in ("customer_token", "openid", "phone", "guest_key")}
+        if system_prompt is not None:
+            # 多融合场景：自定义 system + 只传结构化 facts（不包 USER_TEXT，
+            # 因为这些场景没有顾客自由文本，包了反而诱导模型当客诉处理）。
+            user: dict[str, Any] = {"scenario": scenario, "facts": safe_facts}
+            prompt = system_prompt
+        else:
+            user = {
+                "scenario": scenario,
+                "tag_whitelist": list(TAGS),
+                "categories": list(CATEGORIES),
+                "facts": safe_facts,
+                "user_text": f"<<<USER_TEXT>>>\n{facts.get('text', '')}\n<<<END_USER_TEXT>>>",
+            }
+            prompt = SYSTEM_PROMPT
         body = json.dumps({
             "model": self.model, "temperature": 0.2, "max_tokens": 400,
             "response_format": {"type": "json_object"},
             "messages": [
-                {"role": "system", "content": SYSTEM_PROMPT},
+                {"role": "system", "content": prompt},
                 {"role": "user", "content": json.dumps(user, ensure_ascii=False)},
             ],
         }, ensure_ascii=False).encode("utf-8")
@@ -443,27 +486,48 @@ def make_provider(env: Mapping[str, str] | None = None) -> LLMProvider:
 
 
 def run_guarded(provider: LLMProvider, scenario: str,
-                facts: Mapping[str, Any]) -> AiResult:
+                facts: Mapping[str, Any],
+                spec: AdvSpec | None = None) -> AiResult:
     """统一入口：校验 → 组装 AiResult；在线失败自动降级并留 `degraded_reason`。
 
     **绝不在这里写任何业务状态**。调用方拿到结果后自己决定怎么展示，退款
     审批链路不读这里的任何字段作为依据。
+
+    `spec` 给定时：在线层改用场景自定义 system 提示词，降级改用 spec.rule
+    （场景自己的确定性规则），白名单用 spec 的分类/标签，提示词版本用 spec 的。
+    不传 spec 则完全走原客服路径——guest 现有两个场景零改动。
     """
     started = time.monotonic()
     degraded = ""
     mode, model = provider.mode, provider.model
-    used: LLMProvider = provider
     payload: dict[str, Any] | None = None
-    try:
-        payload = validate_payload(provider.complete(scenario, facts), scenario)
-    except LLMError as exc:
-        degraded = f"{type(exc).__name__}: {str(exc)[:80]}"
-        used = RuleProvider()
-        mode, model = used.mode, used.model
+
+    def _offline() -> dict[str, Any]:
+        """场景自己的确定性降级，没有 rule 就回落到规则层客服逻辑。"""
+        if spec is not None and spec.rule is not None:
+            return spec.rule(facts)
+        return RuleProvider().complete(scenario, facts)
+
+    # 没配 key 时共享 provider 就是 RuleProvider（mode=rule）。这种"本来就在
+    # 离线层"的情形下不能调它的客服兜底 _support——那会给 anomaly 场景返回
+    # 客诉模板。有 spec 就直接走场景自己的规则层，与在线失败降级同一条路径。
+    if spec is not None and getattr(provider, "mode", "") != "live":
+        payload = validate_payload(_offline(), scenario, spec)
+    else:
         try:
-            payload = validate_payload(used.complete(scenario, facts), scenario)
-        except LLMError:  # 规则层是确定性的，走到这里说明 facts 形状有问题
-            raise
+            if spec is not None:
+                raw = provider.complete(scenario, facts,
+                                        system_prompt=spec.system_prompt)
+            else:
+                raw = provider.complete(scenario, facts)
+            payload = validate_payload(raw, scenario, spec)
+        except LLMError as exc:
+            degraded = f"{type(exc).__name__}: {str(exc)[:80]}"
+            mode, model = "rule", RULE_MODEL
+            try:
+                payload = validate_payload(_offline(), scenario, spec)
+            except LLMError:  # 规则层是确定性的，走到这里说明 facts 形状有问题
+                raise
 
     assert payload is not None
     latency = int((time.monotonic() - started) * 1000)
@@ -474,5 +538,6 @@ def run_guarded(provider: LLMProvider, scenario: str,
         confidence=payload["confidence"], tags=payload["tags"],
         mode=mode, model=model, degraded_reason=degraded,
         latency_ms=latency,
+        prompt_version=spec.prompt_version if spec is not None else PROMPT_VERSION,
         injection_suspected=bool(facts.get("injection_suspected")),
     )

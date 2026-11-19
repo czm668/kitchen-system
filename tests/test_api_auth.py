@@ -151,7 +151,8 @@ class TestPermission:
         session = force_session("admin", "manager")
         assert "channel.restore" in session.to_payload()["permissions"]
         guest = force_session("guest", "viewer")
-        assert guest.to_payload()["permissions"] == ["state.read"]
+        # A28 新增 ai.read（面板只读，全员可见）；权限清单按字母序输出。
+        assert guest.to_payload()["permissions"] == ["ai.read", "state.read"]
 
 
 # =========================================================== 账号与登录

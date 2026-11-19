@@ -79,11 +79,13 @@ flowchart TB
 完整设计文档见 [`docs/`](docs/README.md)：01 总体架构 · 02 硬件与 GPIO · 03 数据库 ·
 04 功能规格与联动阈值 · 05 接口与通信契约 · 06 模拟前端实施方案 · 07 管理端 ·
 08 TFT 终端 · 09 小程序 · 10 顾客画像与 AI 客服 · 11 经营账本 · 12 食安合规凭证。
+功能—证据—AI 融合槽位的唯一事实源是 [`docs/requirements.json`](docs/requirements.json)，
+人读版见 [`docs/功能证据矩阵.md`](docs/功能证据矩阵.md)。
 
 ## 快速开始
 
 ```bash
-# 1) 单测（1458 项，纯标准库，不装任何依赖）
+# 1) 单测（1468 项，纯标准库，不装任何依赖）
 python -m pytest -q
 
 # 2) 本地 CI：单测 + 迁移校验 + 前端契约 + 小程序自检
@@ -103,10 +105,41 @@ python -m kitchen.api.server --static web/dist
 才会暴露的坑（镜像缺 `cryptography` 导致认证失败、`docker-entrypoint-initdb.d` 只在空卷
 执行、`.dockerignore` 排掉 `web/` 却仍返回 200 等）。
 
+## 多融合 AI
+
+七个 AI 场景共用一个可插拔 provider（`guest/llm.py::make_provider`）：配了 key 一起切在线模型，
+没配就各自走确定性离线规则，**断网不返回 500**。新增场景只需写一个 `AdvSpec`（提示词 +
+分类白名单 + 离线规则），经统一 `run_guarded` 输出同一 `AiResult` 形状并落 `llm_runs` 审计。
+
+- **顾客域**（既有）：画像 `profile`、AI 客服受理 `support`
+- **经营域**（既有）：日报点评 `finance_daily`
+- **合规域**（既有）：合规日报点评 `compliance_daily`
+- **新增三场景**（`src/kitchen/ai/`）：安全异常归因 `anomaly_explain`、派单优先级建议
+  `dispatch_hint`、食安合规问答 `compliance_qa`
+
+**六条护栏不因"多融合"放松**：AI 只出建议、必有离线降级、结构化白名单输出、逐次审计、
+不喂隐私、可复现。异常归因不关阀、派单建议不下发、合规问答不改门禁——`AiResult` 里
+没有 `approve/decision/amount` 字段，派单/关阀/门禁/退款仍由规则与权限层裁决。
+
+管理端 `GET /api/ai/overview` 一屏聚合七场景的调用/降级/版本；`POST /api/ai/advise/*`
+请求建议（`ai.read` 全员可读面板，`ai.advise` 限组长及以上防刷模型）。守卫与场景清单见
+`docs/requirements.json`，`tests/test_ai_fusion.py` 钉死护栏与边界。
+
 ## 已知边界
 
+> 逐条功能的证据类型（真机 / 半实物 / 仿真 / 单测）与"需求状态、AI 融合槽位"见
+> [`docs/功能证据矩阵.md`](docs/功能证据矩阵.md)，机器可读单一数据源是
+> [`docs/requirements.json`](docs/requirements.json)。当前仍在开题阶段，17 条功能**尚待老师确认**；
+> 学校明确"功能基本不删、主要增加 AI 融合"，新增 AI 需求时按矩阵的统一接入规则落到对应槽位，
+> 不靠改 README 宣称来追。**AI 场景"已落地"仅指建议层已实现，不等于对应硬件已真机验证。**
+
 - **硬件未整机装配**：驱动、三通道互锁、失联降级都有单测与仿真回放，但没有一块焊好的板子。
-- **视觉模型未训练**：明火/离人链路是通的，演示时用脚本注入检测结果，不声称有训练好的模型。
+- **视觉模型部分验证**：`weights/kitchen.pt` 为 6 类轻量模型（person / hat / mask / uniform /
+  cigarette / phone），其中 4 类有验证集，**uniform 与 phone 无独立验证样本**（见 `var/train.log`
+  的 `nt_per_class` 与 `tools/paper_figures.py` 的诚实标注）。明火/离人判定链路是通的，
+  演示时用脚本注入检测结果，**不声称已通过厨房场景实测**。
+- **云部署边界**：MySQL 8.4 单实例，1 GiB 机型参数调优，已验证跨重启持久化与每日备份；
+  不是高可用生产集群。在线 demo 为 HTTP + 裸 IP，无域名、无 HTTPS。
 - **小程序未发正式版**：试用实例开不了备案服务号，缺备案域名 + HTTPS；开发模式与真机预览可用。
 - **支付未接入**：客诉补偿只生成凭证与审批记录，不对接支付渠道。
 
@@ -183,7 +216,7 @@ kitchen-system/                     ← 毕设项目根（文档 + 代码分开�
 │       │   │   ├── auth.py                     四角色九权限 + 令牌签名 + 登录锁定（默认拒绝）
 │       │   │   ├── accounts.py                 账号表（KITCHEN_ACCOUNTS 可覆盖）+ 口令哈希
 │       │   │   ├── audit.py                    操作留痕（含被拒绝的动作）
-│       │   │   ├── routes.py                   57 条 JSON 路由 + 权限校验 + 错误码映射
+│       │   │   ├── routes.py                   65 条主路由 + 28 条扩展路由（合计 98 个 HTTP 接口）
 │       │   │   ├── views.py                    只读视图（订单/甘特/遥测/工单/KPI/参数…）
 │       │   │   ├── actions.py                  写动作（下单/派单/通道/阈值/配方版本/注入）
 │       │   │   ├── state.py                    AppState 门面：装配六域 + 线程安全快照
@@ -211,7 +244,7 @@ kitchen-system/                     ← 毕设项目根（文档 + 代码分开�
 │       │       ├── adc.py                     衰减档量程、两点校准、电阻分压与推荐
 │       │       └── frontend.py                MQ-2 / 火焰 / SCT-013 / HX711 → 契约量纲
 │       ├── scenarios/kitchen.json     场景契约（12 遥测 + 9 动作）
-│       ├── migrations/                数据库迁移 001–014（底座 13 表 + 新表 29 张）
+│       ├── migrations/                数据库迁移 001–019（底座 13 表 + 本工程 6 个版本，共 51 表）
 │       │   ├── 001–013                    取用自旧工程，sha256 记在 BASELINE.json，内容未改
 │       │   ├── 014_kitchen_core.sql       本工程正式版（旧工程同名文件是草案）
 │       │   └── BASELINE.json              基线校验和，防止回头改已执行的迁移

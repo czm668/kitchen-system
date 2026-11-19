@@ -30,6 +30,7 @@ import ComplianceCredentialView from './views/ComplianceCredentialView.vue'
 import TicketsView from './views/TicketsView.vue'
 import GuestView from './views/GuestView.vue'
 import FinanceView from './views/FinanceView.vue'
+import AiView from './views/AiView.vue'
 import ControlView from './views/ControlView.vue'
 import { auth, bootstrap, can, login, logout, whoami } from './stores/auth'
 import { live, startLive, stopLive, connectionText, trippedGuards, injecting, lastInject } from './stores/live'
@@ -47,6 +48,7 @@ const ROUTES = [
   { key: 'tickets', path: '#/tickets', label: '工单中心', icon: 'ticket', view: TicketsView },
   { key: 'guest', path: '#/guest', label: '客诉与画像', icon: 'chat', view: GuestView },
   { key: 'finance', path: '#/finance', label: '经营账本', icon: 'chart', view: FinanceView },
+  { key: 'ai', path: '#/ai', label: '多融合 AI', icon: 'chat', view: AiView },
   { key: 'control', path: '#/control', label: '远程控制与参数', icon: 'sliders', view: ControlView },
 ]
 

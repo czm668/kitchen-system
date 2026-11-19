@@ -10,10 +10,11 @@ Python 版本与依赖安装）。
 
 ## 关卡
 
-1. pytest 全量单测（约 3 分钟）
-2. `tools/migrate.py check`（42 表 / 63 索引迁移校验，SQLite 真跑两遍）
-3. `tools/web_check.py`（管理端 29 项静态检查 + 构建 + HTTP 冒烟）
-4. `tools/miniapp_check.py`（小程序 46 项自检，含 AppID / 配置断言）
+1. `tools/consistency_check.py`（README 规模数字守卫，慢关卡之前先跑）
+2. pytest 全量单测（约 3 分钟）
+3. `tools/migrate.py check`（51 表迁移校验，SQLite 真跑两遍）
+4. `tools/web_check.py`（管理端静态检查 + 构建 + HTTP 冒烟）
+5. `tools/miniapp_check.py`（小程序自检，含 AppID / 配置断言）
 
 用法：
     python tools/ci.py                 # 全部关卡，失败即停
@@ -35,6 +36,7 @@ ROOT = Path(__file__).resolve().parent.parent
 
 #: 关卡清单：(名称, argv, 是否允许跳过)。argv 在 ROOT 下执行。
 STAGES: list[tuple[str, list[str], bool]] = [
+    ("文档数字守卫", [sys.executable, "tools/consistency_check.py"], False),
     ("pytest 全量单测", [sys.executable, "-m", "pytest", "-o", "addopts=", "-q", "tests/"], False),
     ("迁移校验", [sys.executable, "tools/migrate.py", "check"], False),
     ("管理端 web_check", [sys.executable, "tools/web_check.py"], False),

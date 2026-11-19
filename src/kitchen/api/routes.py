@@ -311,6 +311,9 @@ class Router:
         # A13 食安合规凭证（仅管理端，全只读）。删这一行即可整体摘掉。
         from .compliance_api import register_compliance_routes
         register_compliance_routes(self)
+        # A28 多融合 AI 中枢（仅管理端）：面板 + 三场景建议。删这一行整体摘掉。
+        from .ai_api import register_ai_routes
+        register_ai_routes(self)
 
     # ------------------------------------------------------------ 特殊 handler
     def _login(self, state, session, params, data) -> dict[str, Any]:

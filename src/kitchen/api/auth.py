@@ -83,6 +83,10 @@ _PERMISSIONS: dict[str, frozenset[str]] = {
     # A13 合规凭证：组长要拿检查表去现场核缺口，经理要看归档；
     # 观察员/操作员不给（缺口明细属管理信息）。导出同权限，不单独放宽。
     "compliance.read": frozenset({"lead", "manager"}),
+    # A28 多融合 AI：面板/审计只读给全员（含观察员，无隐私数据），
+    # 建议请求限组长/经理——防止顾客端或脚本刷在线模型调用产生费用。
+    "ai.read": frozenset(ROLES),
+    "ai.advise": frozenset({"lead", "manager"}),
 }
 
 
