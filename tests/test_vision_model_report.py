@@ -26,6 +26,19 @@ def metrics():
     return load_metrics()
 
 
+@pytest.fixture(scope="module")
+def train_log():
+    """var/train.log 被 gitignore、11MB，不在 CI 环境里。
+
+    有日志（本地/答辩机）就做溯源锚点校验；没有（GitHub Actions）则跳过——
+    核心的 JSON 自洽校验（check）不依赖日志，任何时候都全程跑。
+    """
+    path = _ROOT / "var" / "train.log"
+    if not path.exists():
+        pytest.skip("var/train.log 未随代码发布（gitignore），本地环境才会有")
+    return path.read_text(encoding="utf-8", errors="replace")
+
+
 class TestAgainstTrainLog:
     """指标必须与 var/train.log 的 best.pt 验证结果逐字对齐。"""
 
@@ -33,18 +46,17 @@ class TestAgainstTrainLog:
         assert metrics["overall"]["map50_95"] == 0.643
         assert metrics["overall"]["map50"] == 0.927
 
-    def test_整体指标对齐日志(self, metrics):
-        log = (_ROOT / "var" / "train.log").read_text(encoding="utf-8", errors="replace")
+    def test_整体指标对齐日志(self, metrics, train_log):
+        log = train_log
         # 日志 L460 的最终行：all 3484 9893 0.904 0.877 0.927 0.643
         assert "3484       9893      0.904      0.877      0.927      0.643" in log
         # nt_per_class / ap_class_index 是审计锚点
         assert "nt_per_class: array([1326, 8147,  331,    0,   89,    0])" in log
         assert "ap_class_index: array([0, 1, 2, 4])" in log
 
-    def test_日志内容锚点仍在(self, metrics):
+    def test_日志内容锚点仍在(self, metrics, train_log):
         """溯源用内容锚点不用行号（日志混用 \\r/\\n，行号会漂）；锚点必须在日志里。"""
-        log = (_ROOT / "var" / "train.log").read_text(
-            encoding="utf-8", errors="replace")
+        log = train_log
         prov = metrics["provenance"]
         for key in ("anchor_overall", "anchor_per_class", "anchor_arrays"):
             assert prov[key] in log, f"日志里找不到 {key}，指标来源可能已变"
