@@ -144,9 +144,10 @@
     "reason": "val 集这两类真值框为 0（nt_per_class[3]=0、nt_per_class[5]=0），ap_class_index 只含 4 类，无法计算 AP。根因：uniform 无可用的公开标注集、phone 只吃了 COCO 预训练底子但自有 val 集未采标注——与 tools/paper_figures.py 的诚实标注一致；未列入的类别不补 0（补 0 会假装'测过且很差'，比'没测'更不诚实）。属数据集拼装缺口，不是代码缺陷。",
     "presentation_rule": "答辩/论文主动说明 4 类有验证集、uniform 与 phone 无独立验证样本；不得声称 6 类全部通过验证，也不得靠加类别掩盖。",
     "improvement_path": [
-      "补采 uniform/phone 的 val 真值框（建议各 ≥50 张独立样本，含擦汗/锅铲/端盘等易混负样本）",
-      "重跑 tools/vision_train.py 生成的训练命令（GPU 环境），更新 var/train.log 与本文件",
-      "在 tools/paper_figures.py 中把两类从'无独立验证样本'改为实测 AP，并保留历史日志可追溯"
+      "（已完成 2026-11-19）补 phone：train 59 框 + val 21 框，COCO 教师伪标注 + 人工逐框目检裁决",
+      "（进行中）kitchen-v2-phone：从 weights/kitchen.pt 微调 15 轮（lr0=0.002，imgsz=416 不变），A/B 通过才替换权重：判据=原 4 类 mAP 不明显回退且 phone AP 明显非零",
+      "uniform：现数据集无工服实例，需厨房场景图像或'反光背心↦uniform'语义决策后再标",
+      "重跑 tools/vision_train.py 生成的命令更新 var/train.log 与本文件"
     ],
     "empirical_checks": {
       "note": "2026-11-19 在 RTX 4060 Laptop(8GB) 训练环境(torch 2.6.0+cu124)实测；脚本 tools/vision_repro.py 可现场复跑。",
@@ -167,6 +168,47 @@
       "full_retrain_cost": "单轮约 6.5 分钟(imgsz416/batch16/21164 图)，80 轮 8+ 小时；更大预训练权重 GitHub/HF 均被代理拦截，无法下载。",
       "root_cause": "提升天花板在数据：uniform/phone 零标注、cigarette 仅 679 张。换模型/调参变不出缺失类别的 AP。"
     },
-    "reproduce": "用训练环境 python 运行 tools/vision_repro.py baseline（非系统默认 python，后默认为 torch CPU 版）；tta 为对照。详见脚本 docstring。"
+    "reproduce": "用训练环境 python 运行 tools/vision_repro.py baseline（非系统默认 python，后默认为 torch CPU 版）；tta 为对照。详见脚本 docstring。",
+    "label_gap": {
+      "note": "2026-11-19 phone 验证/训练集已补齐（COCO cell-phone 教师 + 人工逐框目检裁决，工具 tools/vision_label_patch.py 三步可复现：scan → sheet → commit）。uniform 仍为 0——数据集为工地 PPE 图像（Roboflow 导出，hh-* 前缀 + cig-* 烟头特写），画面中不存在工服/围裙实例，无法诚实补标；若要把 uniform 变实，需厨房场景图像或人工决定'反光背心↦uniform'语义映射并重新标注。",
+      "phone_census": {
+        "method": "yolov8n.pt(COCO 80 类) imgsz=640 conf>=0.30 普查 + 人工对照图逐框裁决",
+        "train": {
+          "scanned": 21164,
+          "candidates": 269,
+          "kept>=0.40": 179,
+          "verified_handheld_merged": 59
+        },
+        "val": {
+          "scanned": 3484,
+          "candidates": 31,
+          "kept>=0.40": 18,
+          "verified_handheld_merged": 21
+        },
+        "test": {
+          "scanned": 3566,
+          "candidates": 46,
+          "kept>=0.40": 25,
+          "merged": 0,
+          "rule": "test 保持 truly held-out，不动"
+        },
+        "verdicts_val": {
+          "accept": 21,
+          "reject": 6,
+          "unclear": 4
+        },
+        "verdicts_train_top104": {
+          "accept": 59,
+          "reject": 45,
+          "unclear_in_top104": 0
+        },
+        "unreviewed_train_candidates": 75,
+        "audit_files": "var/phone_census/（CSV/对照图/裁决表/合并审计 JSON，本地保留不进 git）"
+      },
+      "val_protocol": {
+        "v1": "原 4 类 val 真值（person/hat/mask/cigarette），mAP50-95=0.64375 已冻结",
+        "v2": "val 真值并入 21 个 phone 框后的 5 类口径；v1 权重在 v2 口径下 phone AP≈0，属预期"
+      }
+    }
   }
 }
