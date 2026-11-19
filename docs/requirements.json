@@ -9,7 +9,7 @@
     "total_endpoints": 99,
     "migrations": 19,
     "tables": 51,
-    "pytest_cases": 1558,
+    "pytest_cases": 1568,
     "cloud_selfcheck": "10/10",
     "miniapp_readonly": "16/16",
     "miniapp_write": "24/24"

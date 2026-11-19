@@ -2,7 +2,7 @@
 
 [![ci](https://github.com/czm668/kitchen-system/actions/workflows/ci.yml/badge.svg)](https://github.com/czm668/kitchen-system/actions/workflows/ci.yml)
 [![python](https://img.shields.io/badge/python-3.11-3776ab)](pyproject.toml)
-[![tests](https://img.shields.io/badge/tests-1558-brightgreen)](tests)
+[![tests](https://img.shields.io/badge/tests-1568-brightgreen)](tests)
 [![license](https://img.shields.io/badge/license-non--commercial-red)](LICENSE)
 
 > 定稿题目《基于 ESP32 的后厨智能调度与食安合规管理系统的设计与实现》
@@ -70,7 +70,7 @@ flowchart TB
 | 领域代码 | 103 个模块 / 31,683 行 Python（运行时零第三方依赖） |
 | 数据 | 51 张表 · 19 个版本化迁移 · 4 张核心状态机 |
 | 接口 | 99 个 HTTP 接口（主路由 65 + 扩展 34） |
-| 测试 | 1558 项 pytest，覆盖判定边界、状态机、存储双后端、接口契约 |
+| 测试 | 1568 项 pytest，覆盖判定边界、状态机、存储双后端、接口契约 |
 | 前端 | Vue 3 管理端 12 视图；小程序 9 页 |
 | 部署 | Docker Compose 三容器，阿里云 1 GiB 实测共占 206 MB |
 
@@ -89,7 +89,7 @@ flowchart TB
 `tools/demos/` 下全是离线演示脚本，**不是服务入口**——别从那里挑一个跑就以为服务起来了。
 
 ```bash
-# 1) 单测（1558 项，纯标准库，不装任何依赖）
+# 1) 单测（1568 项，纯标准库，不装任何依赖）
 python -m pytest -q
 
 # 2) 本地 CI：R5 时钟守卫 + 数字守卫 + 单测 + 迁移 + 前端 + 小程序（6 关）
@@ -266,7 +266,7 @@ kitchen-system/                     ← 毕设项目根（文档 + 代码分开�
 │       │   ├── vision_dataset.yaml        视觉数据集配置（names 顺序 = 模型 class id）
 │       │   └── seed_kitchen.sql           种子数据（工位/菜品配方SOP/员工工牌/监测点阈值）
 │       ├── firmware/esp32cam/         ESP32-CAM MJPEG 推流（草图，未编译；引脚表+供电规范）
-│       ├── tests/                     1558 条单测（含 MQTT 链路 6 条、调度器 9 条、prod 安全 4 条）
+│       ├── tests/                     1568 条单测（含 MQTT 链路 6 条、调度器 9 条、prod 安全 4 条）
 │       │   └── fixtures/qr_golden.json    二维码基准哈希（满容量用例由 segno 逐掩码比对确认）
 │       ├── tools/
 │       │   ├── legacy.py                  旧目录素材取用器（list / fetch / verify / check）
@@ -327,7 +327,7 @@ web/
 PY="python"     # 本机便携版：D:/liulan1/毕设/.local/python311/python.exe
 cd "02_项目代码/kitchen"
 
-# 跑全部单测（1558 条）
+# 跑全部单测（1568 条）
 # MQTT 真链路演示（A2）：python tools/demos/mqtt_demo.py --amqtt
 "$PY" -m pytest -q
 
