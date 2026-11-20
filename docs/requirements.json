@@ -5,17 +5,17 @@
   "status": "待老师确认（功能基本不删减，学校要求多融合 AI）",
   "scale": {
     "main_routes": 65,
-    "extension_routes": 34,
-    "total_endpoints": 99,
+    "extension_routes": 36,
+    "total_endpoints": 101,
     "migrations": 19,
     "tables": 51,
-    "pytest_cases": 1568,
+    "pytest_cases": 1697,
     "cloud_selfcheck": "10/10",
     "miniapp_readonly": "16/16",
     "miniapp_write": "24/24"
   },
   "extension_route_breakdown": {
-    "guest_api": 14,
+    "guest_api": 16,
     "finance_api": 9,
     "compliance_api": 5,
     "ai_api": 6
