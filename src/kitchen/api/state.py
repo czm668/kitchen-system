@@ -361,7 +361,7 @@ class AppState:
         )
         self.supervisor = InterlockSupervisor()
         self.controller: InterlockController = self.supervisor.controller
-        self.health = SensorHealthMonitor(clock=self.wall_epoch)
+        self.health = SensorHealthMonitor(clock=self.monotonic)
 
         # 队列与补传：var_dir 没给就落系统临时目录下的固定子目录，
         # **不用 tempfile.mkdtemp()**（本机 TEMP 是 8.3 短名，不可写）
@@ -444,6 +444,19 @@ class AppState:
     def wall_epoch(self) -> float:
         """加速后的 epoch 秒。展示、落库与业务时间戳用这个。"""
         return self._wall_base + self.monotonic() * self.config.time_scale
+
+    def wall_from_monotonic(self, mono: float) -> float:
+        """把** recorded 的单调秒**换算成墙钟（含当前 time_scale）。
+
+        展示层换算历史时间戳必须走这里，不能用「当刻 wall_epoch − 当刻 monotonic」
+        得到的漂移量去外推——那个量含 `mono_now × (scale−1)`，加速档下会把
+        几小时前开的单显示到几天以后（审查 P1-1，scale=60 时实测偏 113 小时）。
+
+        已知边界：`set_time_scale()` 会把已流逝时间按旧因子结清并重设 `_wall_base`，
+        因此跨过变速点的老工单用当前线性式换算仍有偏差。演示期在启动时定档，
+        不中途变速；真要支持中途变速，得把开单时的墙钟一并记在工单上。
+        """
+        return self._wall_base + float(mono) * self.config.time_scale
 
     def to_datetime(self) -> datetime:
         return datetime.fromtimestamp(self.wall_epoch(), CST)
@@ -548,14 +561,19 @@ class AppState:
             self._stop.wait(max(0.0, interval - spent))
 
     def tick(self, metrics: Mapping[str, float] | None = None) -> StepResult:
-        """推进一帧。`metrics` 为空时用仿真档位采样（演示/联调用的就是这条路）。"""
+        """推进一帧。`metrics` 为空时用仿真档位采样（演示/联调用的就是这条路）。
+
+        `moment`（单调秒）只喂仿真脚本与保护层；`wall`（业务时间）喂工单、
+        档位表、遥测与落库。两根轴分开传，见 `offline.tick` 的说明。
+        """
         with self._lock:
             moment = self.monotonic()
+            wall = self.wall_epoch()
             frame = dict(metrics) if metrics is not None else self.demo.frame(moment)
-            step = self.offline.tick(frame, now=moment)
-            self.telemetry.push(self.wall_epoch(), frame)
+            step = self.offline.tick(frame, now=moment, wall_epoch=wall)
+            self.telemetry.push(wall, frame)
             if self.recorder is not None:
-                self.recorder.record_frame(frame, self.to_datetime())
+                self.recorder.record_frame(frame, datetime.fromtimestamp(wall, CST))
             self._ticks += 1
             self._last_tick_at = moment
             self._collect(step, frame)
@@ -575,13 +593,17 @@ class AppState:
                 "message": verdict.message, "actions": list(verdict.actions),
             })
         # 工单时间戳是 `self.monotonic()`（单调秒，见 offline.tick → health.observe），
-        # 升级判定必须用同一个时钟域。两个坑都踩过（2026-11-18 云端实测）：
-        # 1. 传 `self.wall_epoch()`（epoch）→ `now >= due_at + 900` 永远成立，工单一开
-        #    就立刻「超时升级」，超期时长还会算出几千万分钟的荒谬值；
+        # 升级判定必须用同一个时钟域。这条链上踩过三个坑：
+        # 1. 判定用 epoch、开单用单调秒（或反过来）→ `now >= due_at + grace`
+        #    一边永远成立，工单一开就「超时升级」；另一边永远不成立，升级从不发生；
         # 2. 只发事件不调 `escalate()` → `escalated_at` 一直是 None，
         #    `is_due_for_escalation` 每帧都成立，同一张单每秒发 3 行进
-        #    `alarm_events`，跑一天 26 万行，30 GB 盘迟早撑爆。
+        #    `alarm_events`，跑一天 26 万行，30 GB 盘迟早撑爆（2026-11-18 云端实测）。
         # 正确语义：开单 30 分钟没人接单 → 升级一次（L1→L2），之后不再重复。
+        #
+        # 为什么工单用单调秒而不是业务时间：故障判定窗口（卡死 300s / 心跳 60s）
+        # 量的是真实采样节奏，演示加速不能把它们也压掉，否则每切一个仿真场景都
+        # 判一次掉线。展示层负责把单调秒换算成墙钟（`views.ticket_view`）。
         moment = self.monotonic()
         for ticket in self.health.due_escalations(now=moment):
             self.health.escalate(ticket.id, now=moment)

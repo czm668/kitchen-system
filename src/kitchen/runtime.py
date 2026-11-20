@@ -222,10 +222,20 @@ class KitchenRuntime:
         now: float | None = None,
         *,
         raw_metrics: Mapping[str, float] | None = None,
+        wall_epoch: float | None = None,
     ) -> TickResult:
-        """喂一帧遥测，返回本次结果（含本次是否切了档）。"""
+        """喂一帧遥测，返回本次结果（含本次是否切了档）。
+
+        **两根时间轴**：`now` 是单调秒，只给规则窗口做去抖；`wall_epoch` 是
+        业务时间，档位表按「几点几分、星期几」切档，必须用 epoch 秒。以前
+        `profile_at()` 拿到的是单调秒（开机几百秒 = 1970-01-01 00:0x），于是
+        永远落在闭店档——档位表写了等于没写。
+        """
         moment = None if now is None else float(now)
-        wall_now = self._wall_clock() if moment is None else moment
+        wall_now = (
+            float(wall_epoch) if wall_epoch is not None
+            else (self._wall_clock() if moment is None else moment)
+        )
         wanted = self.config.schedule.profile_at(wall_now)
         previous = self.engine.profile
         changed = wanted != previous

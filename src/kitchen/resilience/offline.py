@@ -223,13 +223,30 @@ class OfflineFirstRuntime:
         metrics,
         *,
         now: float | None = None,
+        wall_epoch: float | None = None,
         raw_metrics=None,
         with_degrade: bool = True,
     ) -> StepResult:
-        """一帧：保护 → 引擎 → 互锁 → 入队。**不做任何网络 IO。**"""
+        """一帧：保护 → 引擎 → 互锁 → 入队。**不做任何网络 IO。**
+
+        两个入参是**两根时间轴**，不能合并成一个：
+
+        - `now`：单调秒。喂保护层（30 秒确认窗口、燃气基线窗口的去抖）**和
+          传感器故障判定**（卡死 300 秒、心跳 60 秒）。这两个窗口量的是
+          「真实采样节奏」：演示时把加速因子拉到 60，采样频率并没有变快，
+          判定窗口跟着快 60 倍的话，每切一个仿真场景都会被判成掉线，工单会
+          以每 30 秒 11 张的速度堆起来（实测 9 分钟 197 张）。
+        - `wall_epoch`：业务时间。喂档位表（按几点几分切档）、入队记录的
+          `ts`、降级报告的离线时长。这些字段要给人看、要能跨重启比较。
+
+        缺省 `wall_epoch` 时退回 `self._wall_clock()`（真实墙钟）。
+        """
         self._steps += 1
+        wall = float(self._wall_clock() if wall_epoch is None else wall_epoch)
         guard_verdicts = self.guards.evaluate(metrics, now=now)
-        result = self.runtime.tick(metrics, now=now, raw_metrics=raw_metrics)
+        result = self.runtime.tick(
+            metrics, now=now, wall_epoch=wall, raw_metrics=raw_metrics,
+        )
         verdicts = tuple(result.verdicts)
         self._mark_human_from_card(metrics, now)
 
@@ -240,10 +257,10 @@ class OfflineFirstRuntime:
         if self.health is not None:
             faults = tuple(self.health.observe(metrics, now=now))
 
-        queued = self._enqueue(metrics, verdicts, guard_verdicts, actions, faults, now)
+        queued = self._enqueue(metrics, verdicts, guard_verdicts, actions, faults, wall)
         degrade = None
         if with_degrade:
-            degrade = self._degrade(metrics=metrics, faults=faults, wall_epoch=now)
+            degrade = self._degrade(metrics=metrics, faults=faults, wall_epoch=wall)
 
         step = StepResult(
             profile=result.profile,
@@ -289,12 +306,14 @@ class OfflineFirstRuntime:
         guard_verdicts: tuple[Verdict, ...],
         actions: tuple[str, ...],
         faults: tuple[Any, ...],
-        now: float | None,
+        ts: float | None,
     ) -> int:
+        """记录入队。`ts` 是**业务时间**（epoch 秒）——补传时它就是这条记录
+        在云端的时间戳，传单调秒会让补上去的遥测全落在 1970 年。"""
         queue = self.queue
         if queue is None:
             return 0
-        moment = None if now is None else float(now)
+        moment = None if ts is None else float(ts)
         count = 0
         if self.record_telemetry:
             if queue.append(KIND_TELEMETRY, payload={"metrics": dict(metrics)}, ts=moment):

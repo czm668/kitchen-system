@@ -158,7 +158,7 @@ class RuntimeDB:
             if not self._closed:
                 try:
                     self._raw.rollback()
-                except Exception:
+                except Exception:  # noqa: BLE001 - 只读收尾失败不影响已取到的结果集；连接真坏了下次查询会先报
                     pass
         return rows
 
@@ -214,14 +214,23 @@ class RuntimeDB:
         self._raw.commit()
 
     def close(self) -> None:
+        """提交并关闭；**提交失败必须让调用方看见**。
+
+        这里曾经是 `except Exception: pass`——commit 失败被吞掉，写入没落库却
+        静默成功，正是审查报告 §5.2 第一大根因"静默成功"的形态。现在记 ERROR
+        后原样抛出：宁可让关闭路径报错，也不让数据悄悄丢（口径见
+        docs/15_代码审查标准与流程.md §5.1，守卫 RL001 会拦住回退）。
+        """
         if getattr(self, "_closed", False):
             return
         self._closed = True
         try:
             self._raw.commit()
-        except Exception:
-            pass
-        self._raw.close()
+        except Exception as exc:
+            log.error("关闭时提交失败，未落库的写入可能丢失：%s", exc)
+            raise
+        finally:
+            self._raw.close()
 
     @contextmanager
     def transaction(self) -> Iterator[None]:
@@ -235,7 +244,7 @@ class RuntimeDB:
         except Exception:
             try:
                 self._raw.rollback()
-            except Exception:
+            except Exception:  # noqa: BLE001 - 回滚失败也要把原始异常抛出去，别用回滚错误顶替真因
                 pass
             raise
         else:

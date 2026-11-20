@@ -268,3 +268,45 @@ def test_close幂等_多次调用只关一次底层连接():
     db.close()  # 第二次不应重复关闭底层连接
     assert raw.close_calls == 1
     assert raw.closed is True
+
+
+def test_关闭时提交失败必须抛出而不是静默吞掉():
+    """RL001 回归：close() 曾把 commit 异常 `pass` 掉，"写成功"成了假象。
+
+    背景：审查报告 §5.2 第一大根因"静默成功"；本用例钉住"失败可见"这条不变量。
+    """
+    class _CommitFails(_FakeRaw):
+        def commit(self):
+            raise sqlite3.OperationalError("disk I/O error")
+
+    raw = _CommitFails()
+    db = RuntimeDB(
+        raw, dialect="mysql", display="mysql://u:***@h/db", errors=(sqlite3.Error,),
+    )
+    with pytest.raises(sqlite3.OperationalError):
+        db.close()
+    # 抛异常也必须把底层连接关掉，否则连接泄漏
+    assert raw.close_calls == 1 and raw.closed is True
+    # 已关闭后再调用不重复抛，close 保持幂等
+    db.close()
+
+
+def test_关闭时提交失败必须抛出而不是静默吞掉():
+    """RL001 回归：close() 曾把 commit 异常 `pass` 掉，"写成功"成了假象。
+
+    背景：审查报告 §5.2 第一大根因"静默成功"；本用例钉住"失败可见"这条不变量。
+    """
+    class _CommitFails(_FakeRaw):
+        def commit(self):
+            raise sqlite3.OperationalError("disk I/O error")
+
+    raw = _CommitFails()
+    db = RuntimeDB(
+        raw, dialect="mysql", display="mysql://u:***@h/db", errors=(sqlite3.Error,),
+    )
+    with pytest.raises(sqlite3.OperationalError):
+        db.close()
+    # 抛异常也必须把底层连接关掉，否则连接泄漏
+    assert raw.close_calls == 1 and raw.closed is True
+    # 已关闭后再调用不重复抛，close 保持幂等
+    db.close()

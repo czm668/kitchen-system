@@ -180,7 +180,7 @@ def gantt_view(state, query: dict[str, Any]) -> dict[str, Any]:
             try:
                 order, item = state.orders.item(occ.order_item_id)
                 dish, order_no = item.dish_name, order.order_no
-            except Exception:  # noqa: BLE001
+            except Exception:  # noqa: BLE001 - 菜品已取消/订单已关，菜名留空但工位照样要上板
                 pass
         rows.append({
             "id": occ.id,
@@ -409,7 +409,7 @@ def batch_view(state, query: dict[str, Any]) -> dict[str, Any]:
         supplier_name = ""
         try:
             supplier_name = state.repo.supplier(int(row.get("supplier_id") or 0)).get("name", "")
-        except Exception:  # noqa: BLE001
+        except Exception:  # noqa: BLE001 - 供应商已被删，名称留空，不影响批次列表本身
             pass
         ingredient_batches.append({
             "id": batch_id,
@@ -514,15 +514,20 @@ def ticket_view(state, query: dict[str, Any]) -> dict[str, Any]:
     合流而不是分三个页签：现场运维关心的是「今天有几件事要处理」，不关心
     它来自哪个子系统。`source` 字段负责溯源。
     """
-    epoch_now = state.wall_epoch()
+    # 工单 `opened_at` 存的是单调秒（判定窗口量的是真实采样节奏，不能被演示
+    # 加速压缩），所以「已开多久」「是否超时」都在单调轴上算；只有「什么时候
+    # 开的」要给人看，才换算成墙钟。换算必须按**开单当刻**的 time_scale 做
+    # 逆变换，不能用「当刻 wall_epoch − 当刻 monotonic」的漂移量去外推——
+    # 后者在 scale=60 时会把 1 小时前开的单显示到 113 小时以后（审查 P1-1）。
+    mono_now = state.monotonic()
     rows: list[dict[str, Any]] = []
     for ticket in state.health.tickets():
         payload = ticket.to_payload()
         payload.update({
             "source": "sensor",
-            "opened_at_text": _ts_text(ticket.opened_at),
-            "overdue": ticket.is_overdue(epoch_now),
-            "age_sec": round(max(0.0, epoch_now - ticket.opened_at), 1),
+            "opened_at_text": _ts_text(state.wall_from_monotonic(ticket.opened_at)),
+            "overdue": ticket.is_overdue(mono_now),
+            "age_sec": round(max(0.0, mono_now - ticket.opened_at), 1),
         })
         rows.append(payload)
     for record in state.disinfection.records:
