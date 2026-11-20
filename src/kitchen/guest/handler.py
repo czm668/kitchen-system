@@ -162,6 +162,10 @@ def compose_reply(base_reply: str, analysis: Mapping[str, Any],
     action_texts = [str(x.get("reply") or ACTION_LABELS.get(
         str(x.get("type", "")), str(x.get("detail", "")))) for x in done]
     action_texts = [t for t in action_texts if t]
+    # 转人工分级（`handoff.assess` 算好塞进 handling）：human_now 的第一句
+    # 必须是「谁、几分钟、来做什么」，不能让顾客先读一段工单流程。
+    esc = dict(a.get("escalation") or {})
+    esc_line = str(esc.get("customer_line") or "")
 
     if reply_has_concrete_info(base_reply, a):
         parts = [str(base_reply).strip()]
@@ -187,12 +191,20 @@ def compose_reply(base_reply: str, analysis: Mapping[str, Any],
         else:
             parts.append("当前无待跟进环节，本工单已结案。")
 
+    if esc_line:
+        parts.insert(min(1, len(parts)), esc_line)
+
     if action_texts:
         parts.append("我已" + "；".join(dict.fromkeys(action_texts)) + "。")
 
     if not a.get("terminal"):
         if a.get("overdue"):
             parts.append(f"该环节已超出 30 分钟 SLA 约 {a.get('overdue_min', 0)} 分钟，已升级处理。")
+        elif esc.get("level") == "human_now":
+            # 两个时限要分清：人工到场是分钟级，工单闭环仍是 30 分钟 SLA
+            parts.append(f"人工接管承诺 {esc.get('promise_min', 5)} 分钟到场，"
+                         f"工单 SLA 剩余约 {a.get('sla_remain_min', 0)} 分钟，"
+                         f"超时会自动升级。")
         else:
             parts.append(f"该环节 SLA 剩余约 {a.get('sla_remain_min', 0)} 分钟，超时会自动升级。")
         if a.get("wants_refund"):
@@ -206,7 +218,13 @@ def urgent_actions(analysis: Mapping[str, Any]) -> list[str]:
     owner = analysis.get("blocker_owner")
     if not owner or analysis.get("terminal"):
         return []
-    out = [f"催办{owner}：{analysis.get('next_step', '')}".rstrip("：")]
+    out: list[str] = []
+    esc = dict(analysis.get("escalation") or {})
+    if esc.get("level") == "human_now":
+        # 食品安全/法律风险/顾客要人：这条必须排在催办之前，管理端一眼看到
+        out.append(f"{esc.get('label', '人工接管')}："
+                   f"{esc.get('owner', '')} {esc.get('promise_min', 5)} 分钟内到场")
     if analysis.get("overdue"):
-        out.insert(0, f"超时 {analysis.get('overdue_min', 0)} 分钟，优先处理")
+        out.append(f"超时 {analysis.get('overdue_min', 0)} 分钟，优先处理")
+    out.append(f"催办{owner}：{analysis.get('next_step', '')}".rstrip("："))
     return out

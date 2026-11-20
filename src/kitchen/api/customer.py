@@ -321,6 +321,9 @@ class CustomerService:
                 items.append({
                     "id": item.id,
                     "dish_name": item.dish_name,
+                    # 菜品编码给前端配图（购物车/订单/进度三页共用一张图）：
+                    # 用 code 而不是 dish_id，前端映射表是按 code 生成的，改库重建 id 也不失效
+                    "dish_code": self._dish_code(item.dish_id),
                     "qty": item.qty,
                     "state": item.state.value,
                     "station_id": item.station_id,
@@ -358,6 +361,13 @@ class CustomerService:
         if remain <= 3:
             return "soon"
         return "cooking"
+
+    def _dish_code(self, dish_id: int) -> str:
+        """菜品编码：前端拿它去配图。菜被下架/删除时回空串，前端退化成无图行而不是破图。"""
+        try:
+            return self.state.dishes.dish(dish_id).code
+        except Exception:  # noqa: BLE001 - 菜品已不存在属于正常情况，不该让整个查单失败
+            return ""
 
     # ------------------------------------------------------------ 催菜
     def urge(self, token: Any, item_id: Any) -> dict[str, Any]:
@@ -399,7 +409,7 @@ class CustomerService:
             for order_id in order_ids:
                 try:
                     order = self.state.orders.order(order_id)
-                except Exception:  # noqa: BLE001
+                except Exception:  # noqa: BLE001 - 订单已被清理，跳过，不为幽灵单让整次查询失败
                     continue
                 if any(it.id == item_id for it in order.items):
                     return token
@@ -421,7 +431,7 @@ class CustomerService:
         for order_id in self._orders[key]:
             try:
                 order = self.state.orders.order(order_id)
-            except Exception:  # noqa: BLE001
+            except Exception:  # noqa: BLE001 - 历史订单被清理则跳过该条，通知仍要出全
                 continue
             mine_orders.add(order.order_no)
             mine_items.update(it.id for it in order.items)

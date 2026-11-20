@@ -53,15 +53,60 @@ from kitchen.domain import (
 from kitchen.process.journal import append_journal
 
 from .handler import analyze, compose_reply, urgent_actions
+from . import compensation, guard, handoff, quality
 from .llm import (
-    COMPENSATIONS, TAGS, LLMProvider, RuleProvider, llm_run_row,
-    run_guarded, sanitize_user_text,
+    COMPENSATIONS, COMPENSATION_LABELS, TAGS, LLMProvider, RuleProvider,
+    llm_run_row, run_guarded, sanitize_user_text,
 )
 
 log = logging.getLogger("kitchen.guest")
 
 __all__ = ["GuestError", "ComplaintState", "Evidence", "Complaint",
-           "GuestProfile", "GuestService"]
+           "GuestProfile", "GuestService", "REJECT_CODES"]
+
+#: 驳回原因码 → (对客说明模板, 顾客下一步该做什么)。
+#: `{days}` 由 `REJECT_SUPPLEMENT_DAYS` 填。**内部口径一概不进模板**：
+#: 金额上限、双人复核、审计留痕这些只写进 `reject_reason` 给管理端看。
+REJECT_CODES: dict[str, dict[str, str]] = {
+    "evidence_missing": {
+        "label": "缺少证据",
+        "customer": "这条反馈还需要一点现场凭证才能核实。麻烦您拍一张菜品或小票照片，"
+                    "在 {days} 天内从「我的工单」补充提交，我会接着跟。",
+        "next": "补充现场照片或小票",
+    },
+    "evidence_unclear": {
+        "label": "证据无法辨认",
+        "customer": "您上传的照片我这边看不清关键细节。方便重新拍一张吗？"
+                    "把出问题的菜拍全，{days} 天内补上就行。",
+        "next": "重拍清晰照片",
+    },
+    "amount_exceeded": {
+        "label": "诉求金额超出本单范围",
+        "customer": "您提的补偿金额超出了这一单的实际消费。我按本单金额重新给您申请一版方案，"
+                    "您看是否接受；有疑问可以直接回复我。",
+        "next": "确认按订单金额调整方案",
+    },
+    "duplicate": {
+        "label": "重复提交",
+        "customer": "这个问题您之前已经反馈过，工单还在处理中，我先不重复开单，"
+                    "避免耽误您的时间。进度可以在「我的工单」看到。",
+        "next": "查看已有工单进度",
+    },
+    "not_eligible": {
+        "label": "不符合补偿条件",
+        "customer": "这条反馈我们核实后，暂时不满足补偿条件。具体原因我请值班同事"
+                    "当面跟您说明，您也可以继续回复我。",
+        "next": "等待门店当面说明",
+    },
+    "other": {
+        "label": "其他",
+        "customer": "这条反馈需要再核实一下，我请值班同事跟进，{days} 天内给您答复。",
+        "next": "等待门店跟进",
+    },
+}
+
+#: 驳回后允许补证的天数（对客承诺口径，不是系统硬限制）。
+REJECT_SUPPLEMENT_DAYS = 7
 
 #: 客诉 SLA（真实秒，不受演示 time_scale 影响——演示加速不该让工单瞬间超时）
 SLA_SEC = 30 * 60
@@ -144,7 +189,15 @@ class Complaint:
     reviewed_at: str = ""
     decided_at: str = ""
     reject_reason: str = ""
+    #: 驳回原因码（见 `REJECT_CODES`），用于对客话术与统计，不直接给顾客看。
+    reject_code: str = ""
+    #: 对客可见的驳回说明。**内部口径（金额上限/双人复核/审计）绝不出现在这里。**
+    customer_reason: str = ""
     voucher_no: str = ""
+    #: 结案回访（CSAT）：score 1–5，0 表示未评价。一单只评一次。
+    feedback_score: int = 0
+    feedback_comment: str = ""
+    feedback_at: str = ""
     history: list[dict[str, Any]] = field(default_factory=list)
 
     @property
@@ -172,7 +225,13 @@ class Complaint:
             "ai_suggestion": dict(self.ai_suggestion),
             "reviewer": self.reviewer, "approver": self.approver,
             "reviewed_at": self.reviewed_at, "decided_at": self.decided_at,
-            "reject_reason": self.reject_reason, "voucher_no": self.voucher_no,
+            "reject_reason": self.reject_reason,
+            "reject_code": self.reject_code,
+            "customer_reason": self.customer_reason,
+            "voucher_no": self.voucher_no,
+            "feedback_score": self.feedback_score,
+            "feedback_comment": self.feedback_comment,
+            "feedback_at": self.feedback_at,
             "history": list(self.history),
         }
 
@@ -202,7 +261,12 @@ class Complaint:
             reviewed_at=str(row.get("reviewed_at") or ""),
             decided_at=str(row.get("decided_at") or ""),
             reject_reason=str(row.get("reject_reason") or ""),
+            reject_code=str(row.get("reject_code") or ""),
+            customer_reason=str(row.get("customer_reason") or ""),
             voucher_no=str(row.get("voucher_no") or ""),
+            feedback_score=int(row.get("feedback_score") or 0),
+            feedback_comment=str(row.get("feedback_comment") or ""),
+            feedback_at=str(row.get("feedback_at") or ""),
             history=[dict(x) for x in row.get("history") or ()],
         )
 
@@ -521,9 +585,22 @@ class GuestService:
             if pending:
                 item_obj = min(pending, key=lambda x: (int(x.urge_count or 0), x.id))
 
+        # 分级接管：先算「这单能不能自己兜住」，再决定要不要自动结案。
+        # 顺序很关键——先结案再算接管，等于让模型的一句话决定食安工单去向。
+        escalation = handoff.assess(
+            text=clean_text, category=result.category,
+            sentiment=result.sentiment,
+            wants_refund=bool(wants_refund),
+            need_human=bool(result.need_human),
+            repeat_count=self._unsettled_count(owner["guest_key"]),
+        )
         can_auto = (not wants_refund and not result.need_human
                     and not suspicious
-                    and result.category in AUTO_CLOSE_CATEGORIES)
+                    and result.category in AUTO_CLOSE_CATEGORIES
+                    # 规则层判「需要真人」时，分类再轻也不许自动结案：
+                    # 「菜是凉的」+「要退款」会被判成可结案，这类组合由
+                    # handoff 兜住（它读的是顾客原话，不只是分类）。
+                    and escalation["level"] == "self_service")
         state = (ComplaintState.AUTO_CLOSED if can_auto
                  else ComplaintState.SUBMITTED)
         complaint = Complaint(
@@ -545,11 +622,20 @@ class GuestService:
         # ---- 处理决策：判断阶段/卡点/超时 → 实际执行能自动完成的动作 ----
         handling = analyze(complaint, order=order, item=item_obj,
                            now=moment, sla_sec=SLA_SEC)
+        # 接管级别随 handling 一起落进 ai_suggestion，管理端视图与事件都从这里读
+        handling["escalation"] = escalation
         actions = self._execute_actions(complaint, handling, item=item_obj)
         handling["actions"] = actions
         handling["urgent"] = urgent_actions(handling)
         # AI 若只给了「已转交值班人员」这类空话，用真实数据重写成具体答复
         reply = compose_reply(result.reply, handling, actions)
+        # 出口护栏：模型写的「马上就好 / 已经给您退了」在这里被改写成有事实的说法。
+        # 命中清单落进 handling，质检按它统计模型违规率——不然这层等于没做。
+        reply, guard_hits = guard.scrub(reply)
+        if guard_hits:
+            handling["guard"] = guard_hits
+            log.info("客诉 %s 回复命中禁语 %d 条：%s", complaint.complaint_no,
+                     len(guard_hits), [x["term"] for x in guard_hits])
         result = dc_replace(result, reply=reply)
         complaint.ai_suggestion = {
             **result.to_dict(), "handling": dict(handling),
@@ -558,6 +644,8 @@ class GuestService:
         self._record(complaint, "submit", actor="customer",
                      detail={"ai_mode": result.mode,
                              "auto_closed": can_auto,
+                             "handoff": escalation["level"],
+                             "handoff_code": escalation["code"],
                              "injection_suspected": suspicious,
                              "actions": [x["type"] for x in actions]})
         self.save_complaint(complaint)
@@ -567,6 +655,9 @@ class GuestService:
             "category": complaint.category, "ai_reply": result.reply,
             "ai_summary": result.summary, "ai_mode": result.mode,
             "need_human": result.need_human,
+            # 接管级别是**规则层**的结论，可以比 need_human 更严（overridden 就是
+            # 「模型说不用人、规则层不同意」的记录），前端要展示就展示这个。
+            "handoff": escalation,
             "sla_minutes": SLA_SEC // 60,
             "stage": handling["stage"], "stage_label": handling["stage_label"],
             "blocker": handling["blocker"], "blocker_owner": handling["blocker_owner"],
@@ -587,6 +678,10 @@ class GuestService:
             "stage_label": handling["stage_label"],
             "blocker": handling["blocker"],
             "overdue": handling["overdue"],
+            # 管理端按 level 决定要不要弹提醒：human_now 不能沉在列表里
+            "handoff_level": escalation["level"],
+            "handoff_code": escalation["code"],
+            "handoff_owner": escalation["owner"],
             "actions": [x["type"] for x in actions],
             "message": result.reply or "客诉已受理",
         })
@@ -595,10 +690,31 @@ class GuestService:
             target=complaint.complaint_no,
             after={"category": complaint.category,
                    "wants_refund": complaint.wants_refund,
-                   "ai_mode": result.mode, "auto_closed": can_auto})
+                   "ai_mode": result.mode, "auto_closed": can_auto,
+                   # 审计要能回答「这单当时为什么没人工介入」
+                   "handoff": escalation["level"],
+                   "handoff_code": escalation["code"],
+                   "model_need_human": escalation["model_need_human"],
+                   "overridden": escalation["overridden"]})
         if client_event_id:
             self._idem[("submit", str(client_event_id))] = payload
         return payload
+
+    def _unsettled_count(self, guest_key: str) -> int:
+        """该顾客名下还没结案的工单数。用于「带着未解决工单又提新问题」升级。
+
+        刻意**不按分类**判断：分类来自模型，「汤也是凉的」可能被判成「其他」、
+        「菜凉了」被判成「温度」，按分类对齐会漏掉真正同一件事的重复投诉。
+        顾客只要还有一单悬着又开新单，就说明上一条没解决——这才是该升级的信号。
+
+        已结案（approved / auto_closed）的不计：昨天投诉过不该让今天一开口就被
+        当成惯犯。
+        """
+        try:
+            rows = self.complaints_of(guest_key)
+        except Exception:  # noqa: BLE001 - 统计失败不该让客诉提交失败
+            return 0
+        return sum(1 for c in rows if not c.terminal)
 
     def _build_evidences(self, rows: list[dict[str, Any]]) -> list[Evidence]:
         out: list[Evidence] = []
@@ -746,6 +862,18 @@ class GuestService:
                                        "amount": complaint.amount})
         return self._view(complaint)
 
+    def compensation_advice(self, complaint: Complaint) -> dict[str, Any]:
+        """按分类 + 接管级别 + 订单快照算出本单的补偿建议。只读。"""
+        handling = (complaint.ai_suggestion or {}).get("handling") or {}
+        esc = handling.get("escalation") or {}
+        return compensation.assess(
+            category=complaint.category,
+            level=str(esc.get("level") or "ai_plus_human"),
+            amount=float(complaint.order_snapshot_amount or 0),
+            wants_refund=bool(complaint.wants_refund),
+            handoff_code=str(esc.get("code") or ""),
+        )
+
     def _order_cap(self, complaint: Complaint) -> float:
         """补偿上限 = 提交时落盘的下单价格快照。
 
@@ -783,6 +911,12 @@ class GuestService:
             raise GuestError("至少一条证据需经核实")
         if method not in COMPENSATIONS:
             raise GuestError(f"补偿方式只能是 {' / '.join(COMPENSATIONS)}")
+        advice = self.compensation_advice(complaint)
+        verdict = compensation.check(
+            method, advice=advice,
+            amount=float(complaint.order_snapshot_amount or 0))
+        if not verdict["ok"]:
+            raise GuestError(verdict["error"])
         if complaint.wants_refund and complaint.amount > self._order_cap(complaint):
             raise GuestError("补偿金额超过订单快照金额")
 
@@ -808,7 +942,11 @@ class GuestService:
                                 after={"voucher_no": complaint.voucher_no,
                                        "method": method,
                                        "amount": complaint.amount,
-                                       "reviewer": complaint.reviewer})
+                                       "reviewer": complaint.reviewer,
+                                       "tier": advice["tier"],
+                                       "standard": advice["suggest"],
+                                       "over_tier": verdict["over_tier"],
+                                       "deviation": verdict["warn"]})
         return self._view(complaint)
 
     def resolve(self, complaint_id: int, *, actor: str, role: str,
@@ -830,6 +968,12 @@ class GuestService:
             raise InvalidTransition(f"工单已结案（{complaint.state}），不能重复处理")
         if method not in COMPENSATIONS:
             raise GuestError(f"补偿方式只能是 {' / '.join(COMPENSATIONS)}")
+        advice = self.compensation_advice(complaint)
+        verdict = compensation.check(
+            method, advice=advice,
+            amount=float(complaint.order_snapshot_amount or 0))
+        if not verdict["ok"]:
+            raise GuestError(verdict["error"])
         if complaint.wants_refund and complaint.amount > self._order_cap(complaint):
             raise GuestError("补偿金额超过订单快照金额")
 
@@ -906,31 +1050,56 @@ class GuestService:
                                 target=complaint.complaint_no,
                                 after={"voucher_no": complaint.voucher_no,
                                        "method": method, "amount": complaint.amount,
-                                       "verified_count": complaint.verified_count})
+                                       "verified_count": complaint.verified_count,
+                                       "tier": advice["tier"],
+                                       "standard": advice["suggest"],
+                                       "over_tier": verdict["over_tier"],
+                                       "deviation": verdict["warn"]})
         return self._view(complaint)
 
     def reject(self, complaint_id: int, *, actor: str, role: str,
-               reason: str, expected_version: int | None = None) -> dict[str, Any]:
-        """驳回（lead/manager）。顾客可补证后重新提交，approved 不可驳回。"""
+               reason: str, reason_code: str = "",
+               expected_version: int | None = None) -> dict[str, Any]:
+        """驳回（lead/manager）。顾客可补证后重新提交，approved 不可驳回。
+
+        **内部原因与对客说明分离**：`reason` 是管理端填的内部口径（可含金额、
+        复核、审计细节），只写进 `reject_reason` 与审计；顾客侧只看到按
+        `reason_code` 生成的标准说明 `customer_reason`，外加「补什么、几天内补」。
+        旧调用不传 `reason_code` 时按 `other` 处理，行为兼容。
+        """
         complaint = self.complaint(complaint_id)
         self._guard_version(complaint, expected_version)
         if complaint.terminal:
             raise InvalidTransition("已结案工单不能驳回")
         if not str(reason).strip():
             raise GuestError("驳回必须填写原因")
+        code = str(reason_code or "").strip() or "other"
+        if code not in REJECT_CODES:
+            raise GuestError(
+                f"驳回原因码只能是 {' / '.join(REJECT_CODES)}")
         complaint.state = ComplaintState.REJECTED
         complaint.reject_reason = str(reason).strip()[:200]
+        complaint.reject_code = code
+        complaint.customer_reason = REJECT_CODES[code]["customer"].format(
+            days=REJECT_SUPPLEMENT_DAYS)
         complaint.approver = actor
         complaint.decided_at = self.state.to_datetime().isoformat(timespec="seconds")
         complaint.version += 1
         complaint.updated_at = self.state.to_datetime()
         self._record(complaint, "reject", actor=actor,
-                     detail={"reason": complaint.reject_reason, "role": role})
+                     detail={"reason": complaint.reject_reason,
+                             "code": code, "role": role})
         self.save_complaint(complaint)
+        # 事件面向顾客端，只带对客说明；内部原文留在审计里
         self.state.emit("complaint", {
             "op": "rejected", "complaint_no": complaint.complaint_no,
             "guest_key": complaint.guest_key, "state": complaint.state,
-            "message": f"工单已驳回：{complaint.reject_reason}（可补充证据后重新提交）"})
+            "message": complaint.customer_reason})
+        self.state.audit.record(
+            actor=actor, role=role, action="guest.complaint_reject",
+            target=complaint.complaint_no,
+            after={"reason_code": code, "reason": complaint.reject_reason,
+                   "customer_reason": complaint.customer_reason})
         return self._view(complaint)
 
     def supplement(self, complaint_id: int, *, token: str, guest_key: str,
@@ -957,6 +1126,132 @@ class GuestService:
                      detail={"added": len(rows)})
         self.save_complaint(complaint)
         return self._view(complaint)
+
+    def feedback(self, complaint_id: int, *, token: str, guest_key: str,
+                 score: int, comment: str = "") -> dict[str, Any]:
+        """结案回访（CSAT）。一单一次，1–5 分，可附一句话。
+
+        为什么只让 `approved` / `auto_closed` 评：这两种是「已有结论」的终态，
+        顾客评的是结论而不是等待过程；`rejected` 顾客还在补证，这时逼评分只会
+        把情绪推到更低。评分落工单而不是档案，因为一次客诉对应一次服务体验。
+        """
+        self.state.customer.require_guest(token, guest_key)
+        complaint = self.complaint(complaint_id)
+        if complaint.guest_key != str(guest_key):
+            raise NotFoundError("工单不存在或不属于当前顾客")
+        if complaint.state not in ComplaintState.TERMINAL:
+            raise InvalidTransition("工单还没结案，暂时不能评价")
+        if complaint.feedback_score:
+            raise GuestError("这张工单已经评价过，感谢您的反馈")
+        value = score if isinstance(score, int) else 0
+        if not value:
+            try:
+                value = int(str(score).strip())
+            except (TypeError, ValueError):
+                raise GuestError("满意度评分只能是 1–5 分") from None
+        if not 1 <= value <= 5:
+            raise GuestError("满意度评分只能是 1–5 分")
+
+        moment = self.state.to_datetime()
+        complaint.feedback_score = value
+        complaint.feedback_comment = str(comment or "").strip()[:200]
+        complaint.feedback_at = moment.isoformat(timespec="seconds")
+        complaint.version += 1
+        complaint.updated_at = moment
+        self._record(complaint, "feedback", actor="customer",
+                     detail={"score": value})
+        self.save_complaint(complaint)
+        # 低分立刻通知店长，不等日报——差评隔天才看到就晚了
+        if value <= 2:
+            self.state.emit("complaint", {
+                "op": "low_score", "complaint_no": complaint.complaint_no,
+                "guest_key": complaint.guest_key, "score": value,
+                "message": (f"工单 {complaint.complaint_no} 顾客评分 {value} 分，"
+                            f"请店长当天回访")})
+        self.state.audit.record(
+            actor="customer", role="customer", action="guest.feedback",
+            target=complaint.complaint_no,
+            after={"score": value, "comment": complaint.feedback_comment})
+        return self._view(complaint)
+
+    def quality_stats(self, *, limit: int = 20) -> dict[str, Any]:
+        """客诉质检看板：首响、解决时长、满意度、驳回率、低分单。
+
+        只统计有结论的工单算时长，未结案的不拉低均值。首响取第一条人工动作
+        （核实/直通/终审）的时间——AI 自动答复不算「人响应」。
+        """
+        rows = list(self.all_complaints())
+        first_resp: list[float] = []
+        resolve_min: list[float] = []
+        scores: list[int] = []
+        terminal = rejected = 0
+        l3 = 0
+
+        for c in rows:
+            esc = ((c.ai_suggestion or {}).get("handling") or {}).get("escalation") or {}
+            if str(esc.get("level") or "") == "human_now":
+                l3 += 1
+            if c.state == ComplaintState.REJECTED:
+                rejected += 1
+            if c.feedback_score:
+                scores.append(int(c.feedback_score))
+            if not c.terminal:
+                continue
+            terminal += 1
+            if c.decided_at:
+                try:
+                    resolved = datetime.fromisoformat(c.decided_at)
+                    resolve_min.append(
+                        max(0.0, (resolved - c.created_at).total_seconds() / 60))
+                except ValueError:
+                    pass
+            for item in c.history:
+                if item.get("actor") in ("", "customer"):
+                    continue
+                if item.get("action") not in ("review_evidence", "resolve", "approve"):
+                    continue
+                try:
+                    at = datetime.fromisoformat(str(item.get("time")))
+                except (TypeError, ValueError):
+                    continue
+                first_resp.append(
+                    max(0.0, (at - c.created_at).total_seconds() / 60))
+                break
+
+        def _median(values: list[float]) -> float:
+            if not values:
+                return 0.0
+            ordered = sorted(values)
+            mid = len(ordered) // 2
+            if len(ordered) % 2:
+                return round(ordered[mid], 1)
+            return round((ordered[mid - 1] + ordered[mid]) / 2, 1)
+
+        low = [self._view(c) for c in rows
+               if c.feedback_score and c.feedback_score <= 2]
+        low.sort(key=lambda r: r.get("feedback_at") or "", reverse=True)
+        # 团队质检汇总：复用同一批 _view，评分卡只读不回写
+        qa_rows = [self._view(c) for c in rows]
+        qa = quality.summarize(qa_rows)
+        return {
+            "qa": qa,
+            "total": len(rows),
+            "terminal": terminal,
+            "pending": self.pending_count,
+            "overdue": len(self.overdue()),
+            "rejected": rejected,
+            "reject_rate": round(rejected / len(rows), 3) if rows else 0.0,
+            "human_now": l3,
+            "human_now_rate": round(l3 / len(rows), 3) if rows else 0.0,
+            "first_response_min": _median(first_resp),
+            "resolve_min": _median(resolve_min),
+            "csat": round(sum(scores) / len(scores), 2) if scores else 0.0,
+            "feedback_count": len(scores),
+            "feedback_rate": round(len(scores) / terminal, 3) if terminal else 0.0,
+            "low_scores": low[:max(1, int(limit))],
+            "note": ("首响取第一条人工动作时间，AI 自动答复不计；"
+                     "解决时长只统计已结案工单"),
+        }
 
     # ------------------------------------------------------------ 视图
     def _view(self, complaint: Complaint) -> dict[str, Any]:
@@ -987,7 +1282,44 @@ class GuestService:
         row["overdue"] = bool(handling.get("overdue"))
         row["actions"] = handling.get("actions") or []
         row["urgent"] = handling.get("urgent") or []
+        # 接管级别：管理端列表据此排序/标红，缺省按「AI 已处理」显示，兼容旧工单
+        row["handoff"] = handling.get("escalation") or {
+            "level": "self_service", "code": "normal", "label": "AI 已当场处理",
+            "owner": "", "promise_min": 0, "reasons": [],
+            "overridden": False,
+        }
         row["ai_reply"] = str((complaint.ai_suggestion or {}).get("reply") or "")
+
+        # ---- 补偿建议（SOP 矩阵）：管理端不用再凭感觉选方案 ----
+        advice = self.compensation_advice(complaint)
+        if complaint.state in ComplaintState.TERMINAL:
+            advice = dict(advice, chosen=complaint.method,
+                          chosen_label=COMPENSATION_LABELS.get(
+                              complaint.method, {}).get("label", ""))
+        row["compensation"] = advice
+
+        # ---- 驳回：对客说明与内部原因分离，顾客侧只拿 customer_reason ----
+        if complaint.state == ComplaintState.REJECTED:
+            row["reject_label"] = REJECT_CODES.get(
+                complaint.reject_code or "other", REJECT_CODES["other"])["label"]
+            row["customer_hint"] = {
+                "reason": complaint.customer_reason or REJECT_CODES["other"]["customer"].format(
+                    days=REJECT_SUPPLEMENT_DAYS),
+                "next": REJECT_CODES.get(
+                    complaint.reject_code or "other", REJECT_CODES["other"])["next"],
+                "days": REJECT_SUPPLEMENT_DAYS,
+            }
+        else:
+            row["reject_label"] = ""
+            row["customer_hint"] = None
+
+        # ---- 回访（CSAT）：结案且未评价时置 true，顾客端据此显示星级 ----
+        row["need_feedback"] = (
+            complaint.state in (ComplaintState.APPROVED, ComplaintState.AUTO_CLOSED)
+            and complaint.feedback_score == 0)
+
+        # ---- 质检评分卡：只读，基于本视图已算好的字段，不回写工单 ----
+        row["qa"] = quality.score_complaint(row)
         return row
 
     def complaint_view(self, *, guest_key: str | None = None,

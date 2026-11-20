@@ -97,12 +97,23 @@ def _c_supplement(state, data: dict[str, Any]) -> dict[str, Any]:
     return {"complaint": complaint}
 
 
+def _c_feedback(state, data: dict[str, Any]) -> dict[str, Any]:
+    """结案回访：顾客给 1–5 分。一单一次。"""
+    complaint = state.guest.feedback(
+        _int(data.get("complaint_id") or data.get("id"), "complaint_id"),
+        token=_token(data), guest_key=str(data.get("guest_key") or "").strip(),
+        score=data.get("score"), comment=str(data.get("comment") or ""),
+    )
+    return {"complaint": complaint}
+
+
 CUSTOMER_GUEST_HANDLERS: dict[str, Callable] = {
     "profile": _c_profile,
     "complaints": _c_complaints,
     "submit": _c_submit,
     "chat": _c_chat,
     "supplement": _c_supplement,
+    "feedback": _c_feedback,
 }
 
 
@@ -129,6 +140,11 @@ def guest_llm_view(state, query: dict[str, Any]) -> dict[str, Any]:
                      "dual_review": _guest_service.DUAL_REVIEW},
         "journal": state.guest.journal_stats,
     }
+
+
+def guest_quality_view(state, query: dict[str, Any]) -> dict[str, Any]:
+    """客诉质检看板：首响/解决时长/CSAT/驳回率/L3 占比/低分单。"""
+    return state.guest.quality_stats(limit=int(query.get("limit") or 20))
 
 
 def guest_overview_view(state, query: dict[str, Any]) -> dict[str, Any]:
@@ -191,18 +207,16 @@ def guest_resolve(state, session, params, data) -> dict[str, Any]:
 
 
 def guest_reject(state, session, params, data) -> dict[str, Any]:
+    # 审计已由 `GuestService.reject` 统一落（含内部原因与对客说明的对照），
+    # 这里不再重复记一次，避免同一动作两条审计。
     payload = state.guest.reject(
         _int(params.get("complaint_id"), "complaint_id"),
         actor=session.subject if session else "unknown",
         role=session.role if session else "",
         reason=str(data.get("reason") or ""),
+        reason_code=str(data.get("reason_code") or ""),
         expected_version=data.get("expected_version"),
     )
-    state.audit.record(actor=session.subject if session else "unknown",
-                       role=session.role if session else "",
-                       action="guest.complaint_reject",
-                       target=payload["complaint_no"],
-                       after={"reason": payload["reject_reason"]})
     return {"complaint": payload}
 
 
@@ -254,9 +268,12 @@ def register_guest_routes(router) -> None:
                _cust("chat"), anonymous=True)
     router.add("POST", "/api/customer/guest/complaints/{complaint_id}/supplement",
                _cust("supplement"), anonymous=True)
+    router.add("POST", "/api/customer/guest/complaints/{complaint_id}/feedback",
+               _cust("feedback"), anonymous=True)
 
     # 管理端：登录即可看，写操作按权限点收口
     router.add("GET", "/api/guest/overview", _view(guest_overview_view))
+    router.add("GET", "/api/guest/quality", _view(guest_quality_view))
     router.add("GET", "/api/guest/complaints", _view(guest_complaint_view))
     router.add("GET", "/api/guest/profiles/{guest_key}", _view(guest_profile_view))
     router.add("GET", "/api/guest/llm-runs", _view(guest_llm_view))

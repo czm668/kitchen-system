@@ -20,14 +20,27 @@
 * 本引擎**不批准补偿、不改审批状态**。收集到的补偿诉求仍然走 submit →
   人工审批；引擎只在回复里告知流程，不承诺「已退款」。
 * 动作（催菜/查单/查菜单）都复用现有 customer/orders 接口，不复制状态机。
+* **菜单意图按 `sub` 分答**（`price / store_info / howto / allergy / nutrition /
+  takeaway / payment / recommend / list`）。原来这六种问法共用一句「最便宜的 4 道」，
+  问营业时间会被答成菜单列表——答案层缺的正是这一层，`sub` 由 `intent` 层给。
 """
 from __future__ import annotations
 
 from typing import Any, Mapping
 
+from . import guard, store
 from .intent import classify_intent, intent_result
 
 __all__ = ["ChatService"]
+
+
+def _money(value: Any) -> str:
+    """价格显示成 ¥58 而不是 ¥58.0——顾客看的是一句话，不是调试输出。"""
+    try:
+        num = float(value)
+    except (TypeError, ValueError):
+        return str(value)
+    return str(int(num)) if num == int(num) else f"{num:.2f}"
 
 
 class ChatService:
@@ -67,6 +80,11 @@ class ChatService:
             token=token, guest_key=guest_key, text=raw,
             order_id=order_id, item_id=item_id,
             wants_refund=wants_refund, intent=intent, owner=owner)
+        # 出口护栏：无论哪条分支，对客文案都不许出现「马上就好 / 已经给您退了」。
+        # 规则分支本来就不会说，但这层要挡住以后接在线改写的情况。
+        result["reply"], guard_hits = guard.scrub(result.get("reply"))
+        if guard_hits:
+            result.setdefault("data", {})["guard"] = guard_hits
         result["mode"] = "live" if self.gs.provider.mode == "live" else "rule"
         result["provider"] = self.gs.provider.model
         return result
@@ -74,8 +92,13 @@ class ChatService:
     # ------------------------------------------------------------ 催菜
     def _urge(self, *, token, guest_key, text, order_id, item_id,
               wants_refund, intent, owner) -> dict[str, Any]:
-        """真的催厨房：优先用顾客点名的子项，否则挑一道未完成的菜。"""
+        """真的催厨房：优先用顾客点名的子项，否则挑一道未完成的菜。
+
+        `sub=escalate` 表示顾客说的是「催了好几次还没上」——除了催，还要把
+        超时升级这条讲清楚，否则顾客会觉得催了也没用（FAQ-ORD-005）。
+        """
         state = self.gs.state
+        sub = str(intent.get("sub") or "")
         target_item = None
         if item_id is not None and str(item_id).strip():
             try:
@@ -87,7 +110,7 @@ class ChatService:
             for oid in state.customer.order_ids_of(token):
                 try:
                     order = state.orders.order(oid)
-                except Exception:  # noqa: BLE001
+                except Exception:  # noqa: BLE001 - 订单已被清理，跳过该单继续找下一单
                     continue
                 pending = [x for x in order.items
                            if not getattr(x, "finished", False)]
@@ -95,7 +118,7 @@ class ChatService:
                     target_item = pending[0].id
                     break
         if target_item is None:
-            return intent_result("urge", confidence=intent["confidence"],
+            return intent_result("urge", sub=sub, confidence=intent["confidence"],
                                  reply="您当前没有待出餐的菜品，若已上齐可忽略；"
                                        "如需加菜请到点菜页。",
                                  action="none")
@@ -107,7 +130,7 @@ class ChatService:
             for oid in state.customer.order_ids_of(token):
                 try:
                     order = state.orders.order(oid)
-                except Exception:  # noqa: BLE001
+                except Exception:  # noqa: BLE001 - 同上：幽灵单跳过，不影响定位目标菜品
                     continue
                 item = next((x for x in order.items if x.id == target_item), None)
                 if item:
@@ -115,16 +138,19 @@ class ChatService:
             dish = getattr(item, "dish_name", "您的菜") if item else "您的菜"
             reply = (f"已帮您催「{dish}」（第 {count} 次），厨房的派单优先级"
                      f"已提前，请稍等几分钟。还没上可以再找我。")
-            return intent_result("urge", confidence=intent["confidence"],
+            if sub == "escalate":
+                reply += "这道已经催过多次，如果超过 30 分钟还没上，系统会自动升级到值班人员处理。"
+            return intent_result("urge", sub=sub, confidence=intent["confidence"],
                                  reply=reply, action="urge",
                                  data={"item_id": target_item, "urge_count": count})
         except Exception as exc:  # noqa: BLE001 - 限频/边界都转成自然话术
             msg = str(exc)
             if "频繁" in msg or "30" in msg:
-                reply = "这道菜刚催过，厨房已在加急，稍等一下；马上到我再帮您看。"
+                reply = ("这道菜刚催过（30 秒内不能重复催，避免干扰厨房排单），"
+                         "厨房已在加急，稍等一下；超时会自动升级到值班人员。")
             else:
                 reply = "已记录您的催促，厨房正在处理，请稍等。"
-            return intent_result("urge", confidence=intent["confidence"],
+            return intent_result("urge", sub=sub, confidence=intent["confidence"],
                                  reply=reply, action="none",
                                  data={"note": msg[:80]})
 
@@ -132,16 +158,25 @@ class ChatService:
     def _order_query(self, *, token, guest_key, text, order_id, item_id,
                      wants_refund, intent, owner) -> dict[str, Any]:
         state = self.gs.state
+        sub = str(intent.get("sub") or "status")
+        if sub == "queue":
+            # 系统没有排队/等位数据，答不了「前面还有几桌」——如实说，不编。
+            return intent_result(
+                "order_query", sub="queue", confidence=intent["confidence"],
+                reply=("这会儿的等位情况我这边看不到精确桌数，您到了跟迎宾说一声，"
+                       "我帮您留意。"),
+                action="none")
         ids = list(state.customer.order_ids_of(token))
         if not ids:
-            return intent_result("order_query", confidence=intent["confidence"],
+            return intent_result("order_query", sub=sub,
+                                 confidence=intent["confidence"],
                                  reply="您当前还没有订单，点菜后我可以帮您查进度。",
                                  action="order")
         parts = []
         for oid in ids[-3:]:
             try:
                 order = state.orders.order(oid)
-            except Exception:  # noqa: BLE001
+            except Exception:  # noqa: BLE001 - 最近三单里被清理的跳过，不阻断整段回复
                 continue
             unfinished = [x for x in order.items
                           if not getattr(x, "finished", False)]
@@ -152,38 +187,213 @@ class ChatService:
                 parts.append(f"订单 {order.order_no} 的菜已全部上齐")
         reply = ("；".join(parts) + "。需要催哪道菜，直接告诉我就行。") if parts \
             else "暂时没查到订单进度，稍后再试。"
-        return intent_result("order_query", confidence=intent["confidence"],
+        return intent_result("order_query", sub=sub,
+                             confidence=intent["confidence"],
                              reply=reply, action="order",
                              data={"order_ids": ids[-3:]})
 
-    # ------------------------------------------------------------ 问菜单
+    # ------------------------------------------------------------ 问菜单（按子意图分答）
     def _menu_query(self, *, token, guest_key, text, order_id, item_id,
                     wants_refund, intent, owner) -> dict[str, Any]:
-        state = self.gs.state
+        """菜单意图按 `sub` 选答案，不再一律回一段菜品列表。
+
+        `price / store_info / howto / allergy / nutrition / takeaway / payment`
+        各有专门答复；`recommend` 与 `list` 走原来的列表逻辑（保持兼容）。
+        任何一条都不承诺折扣、热量、销量——系统里没有这些数据。
+        """
+        sub = str(intent.get("sub") or "list")
+        handler = {
+            "price": self._menu_price,
+            "store_info": self._menu_store_info,
+            "payment": self._menu_payment,
+            "howto": self._menu_howto,
+            "allergy": self._menu_allergy,
+            "nutrition": self._menu_nutrition,
+            "takeaway": self._menu_takeaway,
+            "soldout": self._menu_soldout,
+        }.get(sub)
+        if handler is not None:
+            return handler(text=str(text), intent=intent)
+        return self._menu_list(text=str(text), intent=intent)
+
+    # -- 菜单子答复的公共件 -------------------------------------------------
+    def _dishes(self, *, include_sold_out: bool = False) -> list[dict[str, Any]]:
+        """读菜品表。`include_sold_out=True` 用于答「还有吗」这类沽清问题。"""
+        from ..api.views import dish_view
+        payload = dish_view(self.gs.state, {})
+        rows = payload.get("dishes") or []
+        if include_sold_out:
+            return [r for r in rows if r.get("enabled")]
+        return [r for r in rows if r.get("enabled") and not r.get("sold_out")]
+
+    def _match_dish(self, text: str) -> dict[str, Any] | None:
+        """从顾客原话里认出菜名。取最长命中，避免「肉丝」抢了「青椒肉丝」。"""
+        rows = self._dishes(include_sold_out=True)
+        hits = [r for r in rows
+                if str(r.get("name") or "") and str(r["name"]) in text]
+        return max(hits, key=lambda r: len(str(r["name"]))) if hits else None
+
+    def _menu_list(self, *, text: str, intent: Mapping[str, Any]) -> dict[str, Any]:
+        """问「有什么菜」：推荐位给前 4 道，其余给最便宜的 4 道做参考。"""
         try:
-            from ..api.views import dish_view
-            payload = dish_view(state, {})
-            dishes = [r for r in payload["dishes"]
-                      if r.get("enabled") and not r.get("sold_out")]
-            # 顾客问「推荐/招牌/好吃」时给前几样，否则给最便宜的几样做参考
-            keyword = str(text)
-            if any(w in keyword for w in ("推荐", "招牌", "特色", "好吃")):
-                picks = dishes[:4]
-                lead = "招牌推荐"
+            dishes = self._dishes()
+            if any(w in text for w in ("推荐", "招牌", "特色", "好吃")):
+                picks, lead, sub = dishes[:4], "招牌推荐", "recommend"
             else:
                 picks = sorted(dishes, key=lambda r: float(r.get("price") or 0))[:4]
-                lead = "目前在售"
+                lead, sub = "目前在售", "list"
             if picks:
-                lines = [f"{r['name']} ¥{r['price']}" for r in picks]
+                lines = [f"{r['name']} ¥{_money(r['price'])}" for r in picks]
                 reply = f"{lead}：" + "、".join(lines) + "。想点哪道直接说，或到点菜页下单。"
             else:
                 reply = "菜单暂时没准备好，请稍后再问我。"
-            return intent_result("menu_query", confidence=intent["confidence"],
+            return intent_result("menu_query", sub=sub,
+                                 confidence=intent["confidence"],
                                  reply=reply, action="menu",
                                  data={"count": len(dishes)})
         except Exception as exc:  # noqa: BLE001
-            return intent_result("menu_query", confidence=intent["confidence"],
+            return intent_result("menu_query", sub="list",
+                                 confidence=intent["confidence"],
                                  reply="我这就帮您看菜单，请稍等；也可直接在点菜页浏览。",
+                                 action="menu", data={"note": str(exc)[:80]})
+
+    def _menu_price(self, *, text: str, intent: Mapping[str, Any]) -> dict[str, Any]:
+        """问「这道菜多少钱」：按菜名精确报单价，不再答「最便宜的 4 道」。"""
+        try:
+            dish = self._match_dish(text)
+            if dish is None:
+                return intent_result(
+                    "menu_query", sub="price", confidence=intent["confidence"],
+                    reply="您说个菜名我给您报价格；也可以直接到点菜页看全部 26 道。",
+                    action="menu")
+            mins = dish.get("estimate_minutes")
+            reply = f"{dish['name']}¥{_money(dish['price'])}"
+            if mins:
+                reply += f"，参考出餐 {mins} 分钟"
+            peers = [r for r in self._dishes()
+                     if r.get("category") == dish.get("category")
+                     and r.get("code") != dish.get("code")]
+            if peers:
+                reply += f"。同品类的还有{peers[0]['name']}¥{_money(peers[0]['price'])}"
+            reply += "。要帮您下单吗？"
+            return intent_result("menu_query", sub="price",
+                                 confidence=intent["confidence"], reply=reply,
+                                 action="menu",
+                                 data={"code": dish.get("code"),
+                                       "price": dish.get("price")})
+        except Exception as exc:  # noqa: BLE001
+            return intent_result("menu_query", sub="price",
+                                 confidence=intent["confidence"],
+                                 reply="我这就帮您查价格，稍等；点菜页上也有每道菜的标价。",
+                                 action="menu", data={"note": str(exc)[:80]})
+
+    def _menu_store_info(self, *, text: str, intent: Mapping[str, Any]) -> dict[str, Any]:
+        """问门店事实（营业时间/地址/电话/停车/预订/设施）。
+
+        事实来源只认 `store.info()`；没配置就如实说没同步，**不编营业时间**。
+        """
+        res = store.answer(text)
+        return intent_result("menu_query", sub="store_info",
+                             confidence=intent["confidence"],
+                             reply=res["reply"], action="menu",
+                             data={"field": res["field"],
+                                   "configured": res["configured"]})
+
+    def _menu_payment(self, *, text: str, intent: Mapping[str, Any]) -> dict[str, Any]:
+        """问怎么付钱/发票。先说清「小程序只记账不收款」，避免顾客以为付过了。"""
+        res = store.answer(text)
+        base = "小程序下单只记账不收款，餐后到前台结账。"
+        detail = res["reply"] if res["configured"] else \
+            "支付方式和发票我请前台同事跟您确认，别让您白跑。"
+        return intent_result("menu_query", sub="payment",
+                             confidence=intent["confidence"],
+                             reply=base + detail, action="none",
+                             data={"field": res["field"],
+                                   "configured": res["configured"]})
+
+    def _menu_howto(self, *, text: str, intent: Mapping[str, Any]) -> dict[str, Any]:
+        """问怎么点菜。给可执行的路径，不说「请到首页查看」。"""
+        return intent_result(
+            "menu_query", sub="howto", confidence=intent["confidence"],
+            reply=("扫桌上的码就进菜单，选好菜点「加入」，再点右下角「去下单」就行，"
+                   "不用注册也不用登录。下完单在「订单」页能看到进度。"),
+            action="menu")
+
+    def _menu_allergy(self, *, text: str, intent: Mapping[str, Any]) -> dict[str, Any]:
+        """问忌口/过敏。只念配方主料，**绝不承诺「绝对不含」**。"""
+        try:
+            dish = self._match_dish(text)
+            if dish is None:
+                return intent_result(
+                    "menu_query", sub="allergy", confidence=intent["confidence"],
+                    reply=("您对什么过敏？告诉我菜名，我帮您核对配料；"
+                           "严重过敏我会同时叫服务员按后厨流程单独处理。"),
+                    action="menu")
+            recipe_id = dish.get("recipe_id")
+            items = tuple(self.gs.state.repo.recipe_items(recipe_id)) if recipe_id else ()
+            main = "、".join(f"{it.ingredient} {int(it.weight_g)}g"
+                             for it in items[:3] if it.weight_g)
+            if main:
+                reply = (f"{dish['name']}的主料是{main}。您对什么过敏？"
+                         "我帮您核对，确认不了的会让厨房单独确认，绝不靠猜。")
+            else:
+                reply = (f"{dish['name']}的配料明细我这边没取到，"
+                         "您对什么过敏告诉我，我请厨房确认。")
+            return intent_result("menu_query", sub="allergy",
+                                 confidence=intent["confidence"], reply=reply,
+                                 action="menu",
+                                 data={"code": dish.get("code"),
+                                       "asked_human": True})
+        except Exception as exc:  # noqa: BLE001
+            return intent_result("menu_query", sub="allergy",
+                                 confidence=intent["confidence"],
+                                 reply="过敏这事不能猜，我请厨房确认配料后回您。",
+                                 action="menu", data={"note": str(exc)[:80]})
+
+    def _menu_nutrition(self, *, text: str, intent: Mapping[str, Any]) -> dict[str, Any]:
+        """问热量。系统没有营养数据，如实说没有，只给可执行的替代建议。"""
+        return intent_result(
+            "menu_query", sub="nutrition", confidence=intent["confidence"],
+            reply=("菜单目前没有标注热量数据，我不能给您估一个数。清淡些的有凉拌黄瓜、"
+                   "紫菜蛋花汤，做法上可以要求少油少盐。"),
+            action="menu")
+
+    def _menu_takeaway(self, *, text: str, intent: Mapping[str, Any]) -> dict[str, Any]:
+        """问打包/外卖。外卖明确不做，别让顾客白等。"""
+        return intent_result(
+            "menu_query", sub="takeaway", confidence=intent["confidence"],
+            reply=("可以打包，在备注里写「打包」就行，餐具另收。"
+                   "外卖暂不支持，我们只做堂食和到店自取。"),
+            action="menu")
+
+    def _menu_soldout(self, *, text: str, intent: Mapping[str, Any]) -> dict[str, Any]:
+        """问「还有吗」。按沽清事实答，并给同类替换，不说「明天一定有」。"""
+        try:
+            rows = self._dishes(include_sold_out=True)
+            gone = [r for r in rows if r.get("sold_out")]
+            dish = next((r for r in gone
+                         if str(r.get("name") or "") and str(r["name"]) in text), None)
+            if dish is not None:
+                reply = f"{dish['name']}今天已沽清，点不了。"
+            elif gone:
+                reply = ("今天沽清的是：" + "、".join(str(r["name"]) for r in gone[:3])
+                         + "。其余都还能点。")
+            else:
+                reply = "今天的菜都还能点，没有沽清的。"
+            if dish is not None:
+                peers = [r for r in self._dishes()
+                         if r.get("category") == dish.get("category")]
+                if peers:
+                    reply += (f"同类的{peers[0]['name']}还有，"
+                              f"¥{_money(peers[0]['price'])}，要不要换这道？")
+            return intent_result("menu_query", sub="soldout",
+                                 confidence=intent["confidence"], reply=reply,
+                                 action="menu",
+                                 data={"sold_out": [str(r["name"]) for r in gone]})
+        except Exception as exc:  # noqa: BLE001
+            return intent_result("menu_query", sub="soldout",
+                                 confidence=intent["confidence"],
+                                 reply="沽清情况我这就帮您确认，稍等。",
                                  action="menu", data={"note": str(exc)[:80]})
 
     # ------------------------------------------------------------ 闲聊
@@ -226,4 +436,4 @@ class ChatService:
                              routed=False, reply=reply, action="complaint",
                              data={k: submitted.get(k) for k in (
                                  "complaint_no", "state", "stage", "stage_label",
-                                 "blocker", "overdue", "actions")})
+                                 "blocker", "overdue", "actions", "handoff")})
