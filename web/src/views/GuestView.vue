@@ -34,6 +34,7 @@ const compensation = ref('redo')
 const rejectReason = ref('')
 const rejectCode = ref('evidence_missing')
 const showReject = ref(false)
+const followupNote = ref('')
 const profile = ref(null)
 const quality = ref({ csat: 0, first_response_min: 0, feedback_count: 0, reject_rate: 0 })
 // 质检评分卡：自动分只覆盖可取证的 70 分，服务态度 30 分必须人工补评
@@ -82,6 +83,7 @@ const selected = computed(() => complaints.value.find((row) => row.id === select
 const canReview = computed(() => can('guest.review'))
 const canApprove = computed(() => can('guest.approve'))
 const canResolve = computed(() => can('guest.resolve'))
+const canFollowup = computed(() => can('guest.followup'))
 
 function stateOf(value) { return STATE[value] || { label: value, tone: 'plain' } }
 
@@ -148,6 +150,7 @@ function pick(row) {
     ? row.method
     : (advice.suggest || 'redo')
   showReject.value = false
+  followupNote.value = ''
   loadProfile()
 }
 
@@ -192,6 +195,16 @@ function resolve() {
     '已直接处理，凭证已生成（不发生实际退款）')
 }
 
+function doFollowup() {
+  const row = selected.value
+  if (!row) return
+  if (!followupNote.value.trim()) { toastWarn('请填写回访联系情况'); return }
+  act(`/api/guest/complaints/${row.id}/followup`,
+    { note: followupNote.value.trim(), expected_version: row.version },
+    '回访已记录并关闭任务（回访不改评分与工单状态）')
+  followupNote.value = ''
+}
+
 function reject() {
   const row = selected.value
   if (!row) return
@@ -228,8 +241,12 @@ onMounted(load)
       <span v-if="quality.feedback_count" class="tiny muted">
         首响中位 {{ quality.first_response_min }} 分
       </span>
-      <span v-if="quality.low_scores && quality.low_scores.length" class="tag danger">
-        低分待回访 {{ quality.low_scores.length }} 单
+      <span v-if="quality.followup_pending" class="tag danger">
+        低分待回访 {{ quality.followup_pending }} 单
+        <template v-if="quality.followup_overdue"> · 超时 {{ quality.followup_overdue }}</template>
+      </span>
+      <span v-if="quality.followup_total" class="tiny muted">
+        当日回访 {{ quality.followup_done }}/{{ quality.followup_total }}
       </span>
       <span v-if="qa.count" class="tag" :class="qa.avg >= 90 ? 'ok' : qa.avg >= 70 ? 'info' : 'warn'">
         质检 {{ qa.avg }} 分 · 合格 {{ Math.round(qa.pass_rate * 100) }}%
@@ -401,6 +418,40 @@ onMounted(load)
             <div class="tiny muted" style="margin-top: 6px">
               人工补评：{{ selected.qa.manual_items.map(x => x.name + '(' + x.max + ')').join('、') }}
             </div>
+          </div>
+
+          <!-- 低分当日回访：发事件只是"看到"，这里才是"跟到"的闭环 -->
+          <div v-if="selected.followup_due" class="ai-card" style="margin-top: 12px">
+            <div class="row between">
+              <span class="label">低分当日回访 · {{ selected.feedback_score }} 分</span>
+              <span class="tag" :class="selected.followup_state === 'done' ? 'ok'
+                    : (selected.followup_overdue ? 'danger' : 'warn')">
+                {{ selected.followup_state === 'done' ? '已完成'
+                   : (selected.followup_overdue ? '已超时' : '待回访') }}
+              </span>
+            </div>
+            <div class="tiny muted" style="margin-top:6px">
+              当日截止 {{ selected.followup_due.slice(0, 16).replace('T', ' ') }}
+              <template v-if="selected.followup_state === 'done'">
+                · {{ selected.followup_by }} 于 {{ selected.followup_at.slice(0, 16).replace('T', ' ') }} 回访
+              </template>
+            </div>
+            <div v-if="selected.followup_state === 'done'" class="tiny" style="margin-top:6px">
+              联系情况：{{ selected.followup_note }}
+            </div>
+            <template v-else>
+              <div v-if="selected.followup_script" class="tiny" style="margin-top:8px">
+                建议话术：{{ selected.followup_script.text }}
+              </div>
+              <div class="tiny muted" style="margin-top:4px">{{ selected.followup_script.forbid }}</div>
+              <div v-if="canFollowup" class="actions" style="margin-top:8px">
+                <input v-model="followupNote" class="input sm grow"
+                       placeholder="填写联系情况（如：已电话联系，顾客接受重做方案）" />
+                <button class="btn sm primary" :disabled="busy" @click="doFollowup">
+                  记录回访并关闭
+                </button>
+              </div>
+            </template>
           </div>
 
           <!-- 金额：只读 -->
