@@ -247,6 +247,7 @@ onBeforeUnmount(() => { if (timer) clearInterval(timer) })
           :option="groupOption(group)" :height="188"
           :is-empty="!group.metrics.some((id) => series[id]?.length)"
           empty="这一组还没有采样数据"
+          :label="`环境读数趋势：${group.label}，包含 ${group.metrics.map((id) => metaById[id]?.label || id).join('、')}；浅色带为配置上下限`"
         />
         <div class="legend-readout">
           <span v-for="id in group.metrics" :key="id" class="readout">

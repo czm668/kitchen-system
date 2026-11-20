@@ -316,20 +316,20 @@ onMounted(load)
           <span class="tiny muted">按毛利降序 · 成本口径逐行标注</span></div>
         <div class="panel-body">
           <div v-if="!overview.dishes?.length" class="empty">区间内暂无已上桌订单</div>
-          <table v-else class="table">
+          <table aria-label="表格：菜品、销量、营业额、食材成本、毛利、毛利率、成本口径" v-else class="table cards">
             <thead><tr>
-              <th>菜品</th><th>销量</th><th>营业额</th><th>食材成本</th>
-              <th>毛利</th><th>毛利率</th><th>成本口径</th>
+              <th scope="col">菜品</th><th scope="col">销量</th><th scope="col">营业额</th><th scope="col">食材成本</th>
+              <th scope="col">毛利</th><th scope="col">毛利率</th><th scope="col">成本口径</th>
             </tr></thead>
             <tbody>
               <tr v-for="row in overview.dishes" :key="row.dish_id">
-                <td>{{ row.name }}</td>
-                <td class="mono">{{ row.qty }}</td>
-                <td class="mono">{{ money(row.revenue) }}</td>
-                <td class="mono">{{ money(row.cost) }}</td>
-                <td class="mono">{{ money(row.gross) }}</td>
-                <td class="mono">{{ pct(row.margin) }}</td>
-                <td><span class="tag" :class="row.cost_source === 'manual' ? 'ok' : 'plain'">
+                <td data-label="菜品">{{ row.name }}</td>
+                <td data-label="销量" class="mono">{{ row.qty }}</td>
+                <td data-label="营业额" class="mono">{{ money(row.revenue) }}</td>
+                <td data-label="食材成本" class="mono">{{ money(row.cost) }}</td>
+                <td data-label="毛利" class="mono">{{ money(row.gross) }}</td>
+                <td data-label="毛利率" class="mono">{{ pct(row.margin) }}</td>
+                <td data-label="成本口径"><span class="tag" :class="row.cost_source === 'manual' ? 'ok' : 'plain'">
                   {{ row.cost_source === 'manual' ? '手工' : '估算 35%' }}</span></td>
               </tr>
             </tbody>
@@ -399,23 +399,23 @@ onMounted(load)
         </div>
         <div class="panel-body">
           <div v-if="!entries.length" class="empty">区间内暂无账目（下单未上桌的不进流水）</div>
-          <table v-else class="table">
+          <table aria-label="表格：时间、流水号、类型、分类、单号 / 菜品、金额、口径、备注" v-else class="table cards">
             <thead><tr>
-              <th>时间</th><th>流水号</th><th>类型</th><th>分类</th>
-              <th>单号 / 菜品</th><th>金额</th><th>口径</th><th>备注</th>
+              <th scope="col">时间</th><th scope="col">流水号</th><th scope="col">类型</th><th scope="col">分类</th>
+              <th scope="col">单号 / 菜品</th><th scope="col">金额</th><th scope="col">口径</th><th scope="col">备注</th>
             </tr></thead>
             <tbody>
               <tr v-for="row in entries" :key="row.entry_no">
-                <td class="tiny muted">{{ fmtDateTime(row.occurred_at) }}</td>
-                <td class="mono tiny">{{ row.entry_no }}</td>
-                <td><span class="tag plain">{{ kindLabel(row.kind) }}</span></td>
-                <td class="tiny">{{ catLabel(row.category) }}</td>
-                <td class="tiny">{{ row.order_no || '-' }}<br />{{ row.dish_name || '-' }}</td>
-                <td class="mono" :class="{ 'danger-text': row.amount < 0 }">
+                <td data-label="时间" class="tiny muted">{{ fmtDateTime(row.occurred_at) }}</td>
+                <td data-label="流水号" class="mono tiny">{{ row.entry_no }}</td>
+                <td data-label="类型"><span class="tag plain">{{ kindLabel(row.kind) }}</span></td>
+                <td data-label="分类" class="tiny">{{ catLabel(row.category) }}</td>
+                <td data-label="单号 / 菜品" class="tiny">{{ row.order_no || '-' }}<br />{{ row.dish_name || '-' }}</td>
+                <td data-label="金额" class="mono" :class="{ 'danger-text': row.amount < 0 }">
                   {{ row.amount > 0 ? '+' : '' }}{{ Number(row.amount).toFixed(2) }}
                 </td>
-                <td class="tiny muted">{{ row.cost_source === 'estimated' ? '估算' : (row.cost_source === 'manual' ? '手工' : '-') }}</td>
-                <td class="tiny muted ellipsis" style="max-width: 220px">{{ row.note }}</td>
+                <td data-label="口径" class="tiny muted">{{ row.cost_source === 'estimated' ? '估算' : (row.cost_source === 'manual' ? '手工' : '-') }}</td>
+                <td data-label="备注" class="tiny muted ellipsis" style="max-width: 220px">{{ row.note }}</td>
               </tr>
             </tbody>
           </table>
@@ -426,48 +426,77 @@ onMounted(load)
 </template>
 
 <style scoped>
-.finance-view { display: grid; gap: 14px; align-content: start; }
+/* 只保留这一页独有的东西：KPI 网格、自制柱状图、分段控件。
+   表格 / 说明条 / grid-2 / 空态一律走 theme.css 的全局实现，
+   否则同一个后台里会出现两套表格行高和两套圆角。 */
+.finance-view { display: grid; gap: var(--sp-4); align-content: start; }
 .toolbar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
-.notice {
-  padding: 10px 14px; border-radius: 12px; font-size: 12px;
-  background: var(--panel-2); color: var(--text-2); line-height: 1.6;
-}
-.kpi-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; }
+.kpi-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(186px, 1fr)); gap: 12px; }
+/* 与 StatCard 同一套读数比例：34px / 640 字重 / 负字距，两页数字看起来是一个系统 */
 .kpi {
-  padding: 14px 16px; border-radius: 16px; background: var(--panel);
-  box-shadow: var(--shadow-1, 0 1px 3px rgba(0,0,0,.06), 0 8px 24px rgba(0,0,0,.04));
+  padding: 15px 18px; border-radius: var(--radius); background: var(--panel);
+  border: 1px solid rgba(0, 0, 0, 0.05);
+  box-shadow: var(--shadow);
+  display: flex; flex-direction: column; gap: 6px;
+  transition: box-shadow 160ms ease;
 }
-.kpi.negative .kpi-num { color: var(--danger, #d2483f); }
-.kpi-num { font-size: 24px; font-weight: 650; font-variant-numeric: tabular-nums; margin: 6px 0 4px; }
-.grid-2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(360px, 1fr)); gap: 14px; }
-.ai-card { padding: 10px 12px; border-radius: 12px; background: var(--panel-2); }
+:root[data-theme="dark"] .kpi { border-color: var(--line); }
+.kpi:hover { box-shadow: var(--shadow-lg); }
+.kpi.negative .kpi-num { color: var(--danger-ink); }
+.kpi-num {
+  font-size: 26px; font-weight: 640; letter-spacing: -0.03em;
+  font-variant-numeric: tabular-nums; line-height: 1.15;
+}
+.grid-2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(360px, 1fr)); gap: var(--sp-4); }
+.ai-card {
+  padding: 12px 14px; border-radius: var(--radius-sm);
+  background: var(--surface-2); border: 1px solid var(--line);
+  font-size: var(--fs-sm); line-height: 1.65;
+}
 .report-md {
-  margin: 10px 0 8px; padding: 10px; border-radius: 10px;
-  background: var(--panel-2); font-size: 11px; line-height: 1.7;
-  white-space: pre-wrap; word-break: break-word; max-height: 190px; overflow: auto;
+  margin: 10px 0 8px; padding: 12px; border-radius: var(--radius-sm);
+  background: var(--surface-2); border: 1px solid var(--line);
+  font-size: var(--fs-xs); line-height: 1.75;
+  white-space: pre-wrap; word-break: break-word; max-height: 200px; overflow: auto;
 }
-.bars { display: flex; align-items: flex-end; gap: 8px; height: 150px; }
+.bars { display: flex; align-items: flex-end; gap: 8px; height: 156px; }
 .bar-col { flex: 1; display: flex; flex-direction: column; align-items: center; min-width: 0; }
-.bar-val { font-size: 10px; height: 14px; color: var(--text-2); }
+.bar-val { font-size: var(--fs-2xs); height: 15px; color: var(--text-2); }
 .bar-track { width: 100%; flex: 1; display: flex; align-items: flex-end; }
 .bar-fill {
-  width: 100%; border-radius: 6px 6px 2px 2px;
-  background: var(--accent, #0071e3); opacity: .78; transition: height 240ms ease;
+  width: 100%; border-radius: 5px 5px 2px 2px;
+  background: var(--accent); opacity: .82; transition: height 240ms ease;
 }
-.bar-day { margin-top: 6px; font-size: 10px; white-space: nowrap; }
-.table { width: 100%; border-collapse: collapse; font-size: 12px; }
-.table th {
-  text-align: left; font-weight: 500; color: var(--text-2);
-  padding: 8px 10px; border-bottom: 1px solid var(--line);
+.bar-day { margin-top: 6px; font-size: var(--fs-2xs); white-space: nowrap; }
+.segmented {
+  display: inline-flex; padding: 3px; border-radius: 8px;
+  background: var(--panel-2); gap: 2px; border: 1px solid var(--line);
 }
-.table td { padding: 8px 10px; border-bottom: 1px solid var(--line); }
-.table tbody tr:last-child td { border-bottom: none; }
-.segmented { display: inline-flex; padding: 3px; border-radius: 10px; background: var(--panel-2); gap: 2px; }
 .segmented button {
   border: none; background: none; color: var(--text-2); cursor: pointer;
-  padding: 6px 12px; border-radius: 8px; font-size: 12px;
+  padding: 6px 12px; border-radius: 6px; font-size: var(--fs-xs); font-weight: 500;
+  transition: background 130ms ease, color 130ms ease;
 }
-.segmented button.active { background: var(--panel); color: var(--text); box-shadow: 0 1px 3px rgba(0,0,0,.08); }
-.segmented.sm button { padding: 4px 9px; font-size: 11px; }
+.segmented button:hover { color: var(--text); }
+.segmented button.active {
+  background: var(--panel); color: var(--text);
+  box-shadow: var(--shadow-1); font-weight: 600;
+}
+.segmented.sm button { padding: 4px 9px; font-size: var(--fs-2xs); }
 .gap-8 { gap: 8px; }
+
+/* ---------------------------------------------------------------- 窄屏
+   这一段必须放在样式表末尾：`.grid-2` / `.input` 的通用规则在上面，同优先级
+   下后者胜，写在前面等于没写（踩过一次）。 */
+@media (max-width: 720px) {
+  /* 本页 `.grid-2` 的下限是 360px，比手机上能用的宽度（299px）还宽——栅格
+     不是「排成两列」而是把整个页面撑出屏幕，右侧被切掉。下限给 0，否则
+     `1fr` 仍受内容 min-content 托底。 */
+  .grid-2 { grid-template-columns: minmax(0, 1fr); }
+  .toolbar .row.gap-8 { width: 100%; margin-left: 0 !important; }
+  /* 日期框给死宽度：`.input { width: 100% }` 在不定宽的 flex 行里会被解成
+     「撑满容器」，而容器宽度又由内容决定，循环下来 Chromium 解成 360px。
+     140px 正好放得下「2026/11/19」。 */
+  .toolbar .row.gap-8 .input { flex: 0 1 140px; width: 140px; min-width: 0; }
+}
 </style>

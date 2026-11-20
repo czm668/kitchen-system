@@ -14,8 +14,9 @@
  * 权限：`compliance.read` = manager + lead。观察员/操作员看到提示卡而不是 403 报错。
  */
 import { computed, onMounted, ref } from 'vue'
+import StateBlock from '../components/StateBlock.vue'
 import { api } from '../api/client'
-import { can } from '../stores/auth'
+import { can, whoami } from '../stores/auth'
 import { toastError, toastOk } from '../composables/useToast'
 
 const date = ref('')
@@ -32,6 +33,8 @@ const STATE_LABEL = { pass: '达标', warn: '提醒', fail: '未达标', na: '�
 const OVERALL_COLOR = { pass: 'ok', warn: 'warn', fail: 'bad', no_data: 'muted' }
 
 const canRead = computed(() => can('compliance.read'))
+// 打印抬头要写明「谁出具的」，这份表是要签字留档的
+const operator = whoami()
 // 查询串必须写成显式的 `?${...}`：契约扫描器靠 `?` 截断路径，
 // 把 `?` 藏进变量里会被识别成不存在的接口（A13 首跑被这条测试拦下）。
 const qs = () => (date.value ? `date=${encodeURIComponent(date.value)}` : '')
@@ -103,37 +106,67 @@ async function loadDossier() {
     busy.value = false
   }
 }
+
+/**
+ * 首屏加载。
+ *
+ * ⚠ 这一行曾经是缺的：`load()` 定义好了却没人调用，而 `loading` 初值为 `true`，
+ * 于是整页永远停在加载态——表现是「除了一行灰字什么都没有」，且没有任何超时提示。
+ * 所有异步视图都必须在这里挂一次首屏请求。
+ */
+onMounted(load)
 </script>
 
 <template>
   <section class="view">
-    <div class="page-head">
-      <div>
-        <h1>合规凭证</h1>
-        <p class="muted">每日检查表 · 合规日报 · 批次追溯一页纸</p>
-      </div>
-      <div class="row gap-8">
-        <input v-model="date" class="input" type="date" :max="'2099-12-31'" />
-        <button class="btn ghost sm" :disabled="loading || busy" @click="load">刷新</button>
-        <button class="btn sm" :disabled="busy" @click="makeReport">生成日报</button>
-        <button class="btn ghost sm" :disabled="busy" @click="exportCsv">导出检查表 CSV</button>
+    <!-- 只出纸的抬头：打印出来要一眼看出这是哪一天、谁出具、什么时候生成的。
+         屏幕上不占位（display:none），不会挤占首屏。 -->
+    <div class="print-only print-head">
+      <div class="print-head__brand">后厨智能调度 · 食安合规管理系统</div>
+      <div class="print-head__title">每日合规检查与合规日报</div>
+      <div class="print-head__meta">
+        <span>检查日期 {{ check?.date || date }}</span>
+        <span v-if="check">生成时间 {{ check.generated_at }}</span>
+        <span>出具 {{ operator.name || '—' }}{{ operator.roleLabel ? '（' + operator.roleLabel + '）' : '' }}</span>
       </div>
     </div>
 
-    <div v-if="!canRead" class="card notice">
-      当前账号无合规凭证查看权限（需要店长或组长）。
+    <!-- 操作条：页面标题由顶栏统一承担，这里只放范围说明与动作 -->
+    <div class="page-head">
+      <p class="lede">按日汇总当日实际发生的检查事实，只读留档，不能在这里改结论。</p>
+      <div class="row wrap gap-8">
+        <input v-model="date" class="input date-input" type="date" :max="'2099-12-31'" aria-label="选择检查日期" />
+        <button class="btn ghost sm" :disabled="loading || busy" @click="load">刷新</button>
+        <button class="btn primary sm" :disabled="busy" @click="makeReport">生成日报</button>
+        <button class="btn ghost sm" :disabled="busy" @click="exportCsv">导出 CSV</button>
+      </div>
+    </div>
+
+    <div v-if="!canRead" class="notice">
+      <strong>无查看权限</strong>
+      当前账号无合规凭证查看权限，需店长或组长角色。
     </div>
 
     <template v-else>
       <!-- 口径条：任何时候都不能藏起来 -->
       <div class="notice" v-if="check">
         <strong>口径说明</strong> · {{ check.discipline_note }}
-        <div class="tiny muted" style="margin-top: 4px">
+        <div class="tiny muted" style="margin-top: 2px">
           生成时间 {{ check.generated_at }} · 空数据项标记「无数据」，不计入达标率
         </div>
       </div>
 
-      <div v-if="loading" class="card muted">正在汇总当日合规事实…</div>
+      <!-- 加载态：骨架形状与真实内容一致（结论条 → 说明 → 检查网格），
+           换内容时视觉跳变最小。走 StateBlock 统一入口，读屏器能听到「正在加载」。 -->
+      <StateBlock v-if="loading" class="card" title="正在汇总当日合规事实">
+        <template #skeleton>
+          <div class="panel-body" style="display: flex; flex-direction: column; gap: 14px">
+            <div class="skeleton" style="height: 58px; width: 100%"></div>
+            <div class="skeleton" style="height: 16px; width: 42%"></div>
+            <div class="skeleton" style="height: 92px; width: 100%"></div>
+          </div>
+        </template>
+      </StateBlock>
 
       <template v-if="check && !loading">
         <!-- 总体结论 -->
@@ -243,30 +276,62 @@ async function loadDossier() {
             选择批次后查看「原料 → 留样 → 消毒 → 出库门禁 → 工单 → 审计」的合并证据链。
           </div>
         </div>
+
+        <!-- 只出纸的签署栏：这份表打印出来是要签字留档的，
+             没有签字位的「合规日报」在实际场景里是废纸 -->
+        <div class="print-only print-sign">
+          <div class="print-sign__row">
+            <span>店长签字：</span>
+            <span>复核日期：</span>
+          </div>
+          <div class="print-sign__note">
+            本表由系统按当日实际发生的检查事实自动生成，未采集到的检查项标记「无数据」，
+            不计入达标率，亦不视为通过。本表只读留档，不能在系统内改写结论。
+          </div>
+        </div>
       </template>
     </template>
   </section>
 </template>
 
 <style scoped>
-.page-head { display: flex; justify-content: space-between; align-items: flex-end; gap: 16px; margin-bottom: 16px; flex-wrap: wrap; }
+/* 这一页的 .card 直接放内容（不套 panel-body），所以内边距落在卡片身上 */
+.card { padding: 18px; }
+.lede { margin: 0; font-size: var(--fs-sm); color: var(--muted); }
+.date-input { width: 168px; }
 .gap-8 { gap: 8px; }
-.overall { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 16px; }
-.overall__nums { display: flex; gap: 22px; }
-.overall__nums div { display: flex; flex-direction: column; align-items: center; }
-.overall__nums b { font-size: 22px; font-variant-numeric: tabular-nums; }
-.overall__nums span { font-size: 12px; opacity: .7; }
-.items { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 12px; margin-top: 14px; }
-.item { padding: 14px; border-radius: 12px; background: var(--surface-2, rgba(127,127,127,.06)); }
+.overall { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 20px; }
+/* 结论卡按结论染色：达标绿 / 提醒橙 / 未达标红，左侧色条承载语义 */
+.overall.ok { border-left: 3px solid var(--ok); }
+.overall.warn { border-left: 3px solid var(--warn); }
+.overall.bad { border-left: 3px solid var(--danger); }
+.overall.muted { border-left: 3px solid var(--line-strong); }
+.overall__nums { display: flex; gap: 26px; }
+.overall__nums div { display: flex; flex-direction: column; align-items: center; gap: 2px; }
+.overall__nums b { font-size: 24px; font-variant-numeric: tabular-nums; font-weight: 640; letter-spacing: -0.02em; }
+.overall__nums span { font-size: var(--fs-xs); color: var(--muted); }
+.items { display: grid; grid-template-columns: repeat(auto-fill, minmax(270px, 1fr)); gap: 12px; margin-top: 14px; }
+/* 六项检查：中性底 + 左色条，不用整块染色，六张卡并排时不至于花 */
+.item {
+  padding: 14px 16px;
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--line-strong);
+}
+.item.pass { border-left-color: var(--ok); }
+.item.warn { border-left-color: var(--warn); }
+.item.fail { border-left-color: var(--danger); }
+.item.na { border-left-color: var(--line-strong); }
 .item__head { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
-.item__num { font-size: 24px; margin-top: 10px; font-variant-numeric: tabular-nums; }
-.badge { font-size: 11px; padding: 2px 8px; border-radius: 999px; background: rgba(127,127,127,.16); }
-.badge.pass { color: #1a7f37; background: rgba(26,127,55,.12); }
-.badge.warn { color: #9a6700; background: rgba(154,103,0,.12); }
-.badge.fail { color: #c0392b; background: rgba(192,57,43,.12); }
-.gaps { margin: 8px 0 0; padding-left: 18px; font-size: 12px; line-height: 1.6; opacity: .85; }
-.report pre { white-space: pre-wrap; word-break: break-word; font-family: inherit; font-size: 13px; line-height: 1.65; margin: 0; }
+.item__num { font-size: 25px; margin-top: 8px; font-variant-numeric: tabular-nums; font-weight: 620; letter-spacing: -0.02em; }
+.gaps { margin: 8px 0 0; padding-left: 17px; font-size: var(--fs-xs); line-height: 1.65; color: var(--warn-ink); }
+.report pre { white-space: pre-wrap; word-break: break-word; font-family: inherit; font-size: var(--fs-sm); line-height: 1.7; margin: 0; }
 .dossier { margin-top: 14px; }
-.kv { display: flex; justify-content: space-between; padding: 6px 0; border-bottom: 1px solid rgba(127,127,127,.12); font-size: 13px; }
-.select input, .input { min-height: 32px; }
+.kv {
+  display: flex; justify-content: space-between; gap: 16px;
+  padding: 9px 0; border-bottom: 1px solid var(--line); font-size: var(--fs-sm);
+}
+.kv__k { color: var(--muted); flex: none; }
+.kv__v { text-align: right; font-variant-numeric: tabular-nums; }
 </style>

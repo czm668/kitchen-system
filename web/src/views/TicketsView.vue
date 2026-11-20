@@ -23,6 +23,7 @@ import { computed, onMounted, ref } from 'vue'
 import ConfirmDialog from '../components/ConfirmDialog.vue'
 import Icon from '../components/Icon.vue'
 import { api } from '../api/client'
+import StateBlock from '../components/StateBlock.vue'
 import { can } from '../stores/auth'
 import { toastError, toastOk } from '../composables/useToast'
 import { TICKET_STATE, describe, fmtDuration } from '../utils/format'
@@ -135,46 +136,46 @@ onMounted(load)
 
     <section class="panel">
       <div class="panel-body tight">
-        <div v-if="loading" class="empty">加载中…</div>
+        <StateBlock v-if="loading" />
         <div v-else-if="!shown.length" class="empty">
           没有待处理工单。传感器卡死/超量程/心跳丢失会自动开单；消毒不达标会开复消单。
         </div>
-        <table v-else class="table">
+        <table aria-label="表格：来源、级别、内容、状态、已开" v-else class="table cards">
           <thead>
             <tr>
-              <th style="width: 96px">来源</th>
-              <th style="width: 62px">级别</th>
-              <th>内容</th>
-              <th style="width: 84px">状态</th>
-              <th class="num" style="width: 82px">已开</th>
-              <th style="width: 172px"></th>
+              <th scope="col" style="width: 106px">来源</th>
+              <th scope="col" style="width: 64px">级别</th>
+              <th scope="col">内容</th>
+              <th scope="col" style="width: 98px">状态</th>
+              <th scope="col" class="num" style="width: 104px">已开</th>
+              <th scope="col" style="width: 176px"></th>
             </tr>
           </thead>
           <tbody>
             <tr v-for="row in shown" :key="String(row.id)" :class="{ over: row.overdue }">
-              <td>
+              <td data-label="来源">
                 <div class="small">{{ SOURCE_LABEL[row.source] || row.source || '—' }}</div>
                 <div class="tiny muted mono">{{ TYPE_LABEL[row.type] || row.type || '' }}</div>
               </td>
-              <td>
+              <td data-label="级别">
                 <span class="tag" :class="(row.level || 1) >= 2 ? 'danger' : 'warn'">
                   {{ LEVEL_LABEL[row.level] || `L${row.level || 1}` }}
                 </span>
               </td>
-              <td>
+              <td data-label="内容">
                 <div class="pre-wrap">{{ row.message || row.detail || '—' }}</div>
                 <div v-if="row.metric" class="tiny muted mono">指标 {{ row.metric }}</div>
                 <div v-if="row.forbid_outbound" class="tiny" style="color: var(--danger)">
                   已阻止出库
                 </div>
               </td>
-              <td>
+              <td data-label="状态">
                 <span class="tag" :class="describe(TICKET_STATE, row.state).tone">
                   {{ describe(TICKET_STATE, row.state).label }}
                 </span>
                 <div v-if="row.overdue" class="tiny" style="color: var(--danger)">超时</div>
               </td>
-              <td class="num mono small">{{ fmtDuration(row.age_sec) }}</td>
+              <td data-label="已开" class="num mono small">{{ fmtDuration(row.age_sec) }}</td>
               <td class="num">
                 <div class="row" style="justify-content: flex-end; gap: 5px">
                   <button
@@ -231,20 +232,30 @@ onMounted(load)
 .toolbar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .seg {
   display: inline-flex;
-  padding: 2px;
-  border-radius: var(--radius-sm);
+  flex-wrap: wrap;
+  padding: 3px;
+  border-radius: 8px;
   background: var(--panel);
   border: 1px solid var(--line);
+  gap: 2px;
 }
 .seg-btn {
   border: none;
   background: none;
   color: var(--muted);
-  padding: 4px 11px;
-  border-radius: 4px;
+  padding: 5px 12px;
+  border-radius: 6px;
   cursor: pointer;
-  font-size: 12px;
+  font-size: var(--fs-xs);
+  font-weight: 500;
+  white-space: nowrap;
+  transition: background 130ms ease, color 130ms ease;
 }
-.seg-btn.active { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
+.seg-btn:hover { color: var(--text); }
+.seg-btn.active { background: var(--accent-soft); color: var(--accent-ink); font-weight: 600; }
+/* 固定列宽：自动布局会让「内容」列抢走来源/状态的宽度，
+   结果每个单元格都在折行，整张表被撑成一条条高栅栏。 */
+.table { table-layout: fixed; }
+.table td { overflow: hidden; text-overflow: ellipsis; }
 tr.over td { background: var(--danger-soft); }
 </style>

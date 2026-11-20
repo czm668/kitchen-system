@@ -51,6 +51,14 @@ export function fmtDuration(seconds) {
   }
   const hours = Math.floor(total / 3600)
   const min = Math.round((total % 3600) / 60)
+  /* 超过一天改用「天」：传感器离线久了的工单 age 可能是几万小时，
+     `498657 小时 48 分` 这种串在表格里会折成三行，把行高撑到看不下去。 */
+  if (total >= 86400) {
+    const days = Math.floor(total / 86400)
+    if (days >= 30) return `${days} 天`
+    const restHour = Math.round((total % 86400) / 3600)
+    return restHour ? `${days} 天 ${restHour} 小时` : `${days} 天`
+  }
   return min ? `${hours} 小时 ${min} 分` : `${hours} 小时`
 }
 

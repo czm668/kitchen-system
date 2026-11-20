@@ -29,6 +29,7 @@
 import { computed, onMounted, ref } from 'vue'
 import Icon from '../components/Icon.vue'
 import { api } from '../api/client'
+import StateBlock from '../components/StateBlock.vue'
 import { can } from '../stores/auth'
 import { toastError, toastOk, toastWarn } from '../composables/useToast'
 import { fmt, fmtInt } from '../utils/format'
@@ -388,27 +389,27 @@ onMounted(load)
             </span>
           </div>
 
-          <div v-if="loading" class="empty">加载中…</div>
+          <StateBlock v-if="loading" />
           <div v-else-if="!morning?.staff?.length" class="empty">还没有人员数据</div>
           <template v-else>
             <div v-if="!pending.length" class="empty ok-empty">
               今天没有待复核的晨检。
               <span v-if="missing.length">（{{ missing.length }} 人还没提交问卷）</span>
             </div>
-            <table v-else class="table">
+            <table aria-label="表格：姓名、状态、问卷结论" v-else class="table cards">
               <thead>
                 <tr>
-                  <th>姓名</th>
-                  <th>状态</th>
-                  <th>问卷结论</th>
-                  <th style="width: 96px"></th>
+                  <th scope="col">姓名</th>
+                  <th scope="col">状态</th>
+                  <th scope="col">问卷结论</th>
+                  <th scope="col" style="width: 96px"></th>
                 </tr>
               </thead>
               <tbody>
                 <tr v-for="row in pending" :key="row.staff_id">
-                  <td class="bold">{{ row.name }}</td>
-                  <td><span class="tag danger">{{ row.state_label }}</span></td>
-                  <td class="small pre-wrap">{{ row.describe }}</td>
+                  <td data-label="姓名" class="bold">{{ row.name }}</td>
+                  <td data-label="状态"><span class="tag danger">{{ row.state_label }}</span></td>
+                  <td data-label="问卷结论" class="small pre-wrap">{{ row.describe }}</td>
                   <td class="num">
                     <button
                       class="btn primary sm" :disabled="!can('ticket.write') || busy === row.staff_id"
@@ -418,14 +419,14 @@ onMounted(load)
                 </tr>
               </tbody>
             </table>
-            <table v-if="missing.length" class="table" style="margin-top: 14px">
+            <table aria-label="表格：未提交问卷、状态" v-if="missing.length" class="table cards" style="margin-top: 14px">
               <thead>
-                <tr><th>未提交问卷</th><th style="width: 110px">状态</th><th></th></tr>
+                <tr><th scope="col">未提交问卷</th><th scope="col" style="width: 110px">状态</th><th scope="col"></th></tr>
               </thead>
               <tbody>
                 <tr v-for="row in missing" :key="row.staff_id">
-                  <td>{{ row.name }}</td>
-                  <td><span class="tag plain">未提交</span></td>
+                  <td data-label="未提交问卷">{{ row.name }}</td>
+                  <td data-label="状态"><span class="tag plain">未提交</span></td>
                   <td class="tiny muted">开档前须在 TFT 刷卡填问卷，否则无法上灶</td>
                 </tr>
               </tbody>
@@ -435,26 +436,26 @@ onMounted(load)
 
         <!-- 健康证 -->
         <template v-else-if="tab === 'certs'">
-          <table class="table">
+          <table aria-label="表格：姓名、证号、有效期至、剩余、状态" class="table cards">
             <thead>
               <tr>
-                <th>姓名</th>
-                <th>证号</th>
-                <th style="width: 108px">有效期至</th>
-                <th class="num" style="width: 86px">剩余</th>
-                <th style="width: 88px">状态</th>
+                <th scope="col">姓名</th>
+                <th scope="col">证号</th>
+                <th scope="col" style="width: 108px">有效期至</th>
+                <th scope="col" class="num" style="width: 86px">剩余</th>
+                <th scope="col" style="width: 88px">状态</th>
               </tr>
             </thead>
             <tbody>
               <tr v-for="(row, i) in certs" :key="i" :class="{ warnrow: row.warn }">
-                <td class="bold">{{ row.name }}</td>
-                <td class="mono small">{{ row.cert_no || '—' }}</td>
-                <td class="mono small">{{ row.valid_to || '—' }}</td>
-                <td class="num mono">
+                <td data-label="姓名" class="bold">{{ row.name }}</td>
+                <td data-label="证号" class="mono small">{{ row.cert_no || '—' }}</td>
+                <td data-label="有效期至" class="mono small">{{ row.valid_to || '—' }}</td>
+                <td data-label="剩余" class="num mono">
                   {{ row.days_left == null ? '—' : fmtInt(row.days_left) }}
                   <span class="tiny muted">天</span>
                 </td>
-                <td>
+                <td data-label="状态">
                   <span class="tag" :class="row.valid_today ? (row.warn ? 'warn' : 'ok') : 'danger'">
                     {{ row.valid_today ? (row.warn ? '即将到期' : '有效') : '已过期' }}
                   </span>
@@ -466,33 +467,33 @@ onMounted(load)
 
         <!-- 人员资质 -->
         <template v-else-if="tab === 'staff'">
-          <table class="table">
+          <table aria-label="表格：工号、姓名、资质、卡号、健康证、在岗" class="table cards">
             <thead>
               <tr>
-                <th style="width: 70px">工号</th>
-                <th style="width: 80px">姓名</th>
-                <th>资质</th>
-                <th style="width: 120px">卡号</th>
-                <th style="width: 84px">健康证</th>
-                <th style="width: 70px">在岗</th>
+                <th scope="col" style="width: 70px">工号</th>
+                <th scope="col" style="width: 80px">姓名</th>
+                <th scope="col">资质</th>
+                <th scope="col" style="width: 120px">卡号</th>
+                <th scope="col" style="width: 84px">健康证</th>
+                <th scope="col" style="width: 70px">在岗</th>
               </tr>
             </thead>
             <tbody>
               <tr v-for="person in staff" :key="person.id">
-                <td class="mono small">{{ person.code }}</td>
-                <td class="bold">{{ person.name }}</td>
-                <td>
+                <td data-label="工号" class="mono small">{{ person.code }}</td>
+                <td data-label="姓名" class="bold">{{ person.name }}</td>
+                <td data-label="资质">
                   <span v-for="q in person.qualifications" :key="q" class="tag plain" style="margin-right: 4px">
                     {{ q }}
                   </span>
                 </td>
-                <td class="mono tiny">{{ person.card_uid || '未绑卡' }}</td>
-                <td>
+                <td data-label="卡号" class="mono tiny">{{ person.card_uid || '未绑卡' }}</td>
+                <td data-label="健康证">
                   <span class="tag" :class="person.valid_certificates ? 'ok' : 'danger'">
                     {{ person.valid_certificates }}/{{ person.certificates }}
                   </span>
                 </td>
-                <td>
+                <td data-label="在岗">
                   <span class="tag" :class="person.on_duty ? 'ok' : 'plain'">
                     {{ person.on_duty ? '在岗' : '不在岗' }}
                   </span>
@@ -514,20 +515,20 @@ onMounted(load)
               <h3>原料批次 <span class="tiny muted">（溯源主体：这批肉/菜从哪来）</span></h3>
               <button v-if="writable && !ingredientDraft" class="btn sm" @click="ingredientDraft = blankIngredient(); ingredientDraftText = ''">+ 新增原料批次</button>
             </div>
-            <table class="table">
+            <table aria-label="表格：原料、到货批次、供应商、到货 / 到期、检疫、操作" class="table cards">
               <thead>
                 <tr>
-                  <th>原料</th><th>到货批次</th><th>供应商</th><th>到货 / 到期</th><th>检疫</th><th v-if="writable" style="width:56px">操作</th>
+                  <th scope="col">原料</th><th scope="col">到货批次</th><th scope="col">供应商</th><th scope="col">到货 / 到期</th><th scope="col">检疫</th><th scope="col" v-if="writable" style="width:56px">操作</th>
                 </tr>
               </thead>
               <tbody>
                 <tr v-for="row in ingredientBatches" :key="row.id">
-                  <td class="small">{{ row.ingredient_name }}</td>
-                  <td class="mono small">{{ row.batch_no }}</td>
-                  <td class="small">{{ row.supplier_name || row.supplier_id }}</td>
-                  <td class="mono tiny">{{ row.received_at || '—' }} → {{ row.expire_at || '—' }}</td>
-                  <td class="tiny muted">{{ Object.entries(row.inspection || {}).map(([k, v]) => k + ':' + v).join('、') || '—' }}</td>
-                  <td v-if="writable"><button class="linkbtn" @click="editIngredient(row)">编辑</button></td>
+                  <td data-label="原料" class="small">{{ row.ingredient_name }}</td>
+                  <td data-label="到货批次" class="mono small">{{ row.batch_no }}</td>
+                  <td data-label="供应商" class="small">{{ row.supplier_name || row.supplier_id }}</td>
+                  <td data-label="到货 / 到期" class="mono tiny">{{ row.received_at || '—' }} → {{ row.expire_at || '—' }}</td>
+                  <td data-label="检疫" class="tiny muted">{{ Object.entries(row.inspection || {}).map(([k, v]) => k + ':' + v).join('、') || '—' }}</td>
+                  <td data-label="操作" v-if="writable"><button class="linkbtn" @click="editIngredient(row)">编辑</button></td>
                 </tr>
                 <tr v-if="!ingredientBatches.length"><td colspan="6" class="empty">还没有原料批次</td></tr>
               </tbody>
@@ -558,19 +559,19 @@ onMounted(load)
               <h3>溯源码 <span class="tiny muted">（顾客扫码查询的码）</span></h3>
               <button v-if="writable && !traceDraft" class="btn sm" @click="traceDraft = blankTrace(); traceDraftText = ''">+ 新增溯源码</button>
             </div>
-            <table class="table">
+            <table aria-label="表格：溯源码、菜品批次、供应商、检测信息、操作" class="table cards">
               <thead>
                 <tr>
-                  <th>溯源码</th><th>菜品批次</th><th>供应商</th><th>检测信息</th><th v-if="writable" style="width:56px">操作</th>
+                  <th scope="col">溯源码</th><th scope="col">菜品批次</th><th scope="col">供应商</th><th scope="col">检测信息</th><th scope="col" v-if="writable" style="width:56px">操作</th>
                 </tr>
               </thead>
               <tbody>
                 <tr v-for="row in traceCodes" :key="row.code">
-                  <td class="mono small">{{ row.code }}</td>
-                  <td class="small">{{ batches.find((b) => b.id === row.batch_id)?.batch_no || row.batch_id || '—' }}</td>
-                  <td class="small">{{ suppliers.find((s) => s.id === row.supplier_id)?.name || row.supplier_id || '—' }}</td>
-                  <td class="tiny muted pre-wrap">{{ Object.entries(row.payload || {}).map(([k, v]) => `${k}:${v}`).join('，') || '—' }}</td>
-                  <td v-if="writable"><button class="linkbtn" @click="editTrace(row)">编辑</button></td>
+                  <td data-label="溯源码" class="mono small">{{ row.code }}</td>
+                  <td data-label="菜品批次" class="small">{{ batches.find((b) => b.id === row.batch_id)?.batch_no || row.batch_id || '—' }}</td>
+                  <td data-label="供应商" class="small">{{ suppliers.find((s) => s.id === row.supplier_id)?.name || row.supplier_id || '—' }}</td>
+                  <td data-label="检测信息" class="tiny muted pre-wrap">{{ Object.entries(row.payload || {}).map(([k, v]) => `${k}:${v}`).join('，') || '—' }}</td>
+                  <td data-label="操作" v-if="writable"><button class="linkbtn" @click="editTrace(row)">编辑</button></td>
                 </tr>
                 <tr v-if="!traceCodes.length"><td colspan="5" class="empty">还没有溯源码</td></tr>
               </tbody>
@@ -607,19 +608,19 @@ onMounted(load)
               <h3>食材批次</h3>
               <button v-if="writable && !batchDraft" class="btn sm" @click="batchDraft = blankBatch()">+ 新增批次</button>
             </div>
-            <table class="table">
+            <table aria-label="表格：批次号、菜品、生产时间、到期时间、操作" class="table cards">
               <thead>
                 <tr>
-                  <th>批次号</th><th>菜品</th><th>生产时间</th><th>到期时间</th><th v-if="writable" style="width:56px">操作</th>
+                  <th scope="col">批次号</th><th scope="col">菜品</th><th scope="col">生产时间</th><th scope="col">到期时间</th><th scope="col" v-if="writable" style="width:56px">操作</th>
                 </tr>
               </thead>
               <tbody>
                 <tr v-for="row in batches" :key="row.id">
-                  <td class="mono small">{{ row.batch_no }}</td>
-                  <td class="small">{{ dishOptions.find((d) => d.id === row.dish_id)?.name || row.dish_id }}</td>
-                  <td class="mono small">{{ fmtTime(row.produced_at) }}</td>
-                  <td class="mono small">{{ fmtTime(row.expire_at) }}</td>
-                  <td v-if="writable"><button class="linkbtn" @click="editBatch(row)">编辑</button></td>
+                  <td data-label="批次号" class="mono small">{{ row.batch_no }}</td>
+                  <td data-label="菜品" class="small">{{ dishOptions.find((d) => d.id === row.dish_id)?.name || row.dish_id }}</td>
+                  <td data-label="生产时间" class="mono small">{{ fmtTime(row.produced_at) }}</td>
+                  <td data-label="到期时间" class="mono small">{{ fmtTime(row.expire_at) }}</td>
+                  <td data-label="操作" v-if="writable"><button class="linkbtn" @click="editBatch(row)">编辑</button></td>
                 </tr>
                 <tr v-if="!batches.length"><td colspan="5" class="empty">还没有批次</td></tr>
               </tbody>
@@ -648,19 +649,19 @@ onMounted(load)
               <h3>供应商</h3>
               <button v-if="writable && !supplierDraft" class="btn sm" @click="supplierDraft = blankSupplier()">+ 新增供应商</button>
             </div>
-            <table class="table">
+            <table aria-label="表格：名称、许可证号、联系人、资质、操作" class="table cards">
               <thead>
                 <tr>
-                  <th>名称</th><th>许可证号</th><th>联系人</th><th>资质</th><th v-if="writable" style="width:56px">操作</th>
+                  <th scope="col">名称</th><th scope="col">许可证号</th><th scope="col">联系人</th><th scope="col">资质</th><th scope="col" v-if="writable" style="width:56px">操作</th>
                 </tr>
               </thead>
               <tbody>
                 <tr v-for="row in suppliers" :key="row.id">
-                  <td class="small">{{ row.name }}</td>
-                  <td class="mono small">{{ row.license_no || '—' }}</td>
-                  <td class="small">{{ row.contact || '—' }}</td>
-                  <td class="tiny muted">{{ (row.qualifications || []).join('、') || '—' }}</td>
-                  <td v-if="writable"><button class="linkbtn" @click="editSupplier(row)">编辑</button></td>
+                  <td data-label="名称" class="small">{{ row.name }}</td>
+                  <td data-label="许可证号" class="mono small">{{ row.license_no || '—' }}</td>
+                  <td data-label="联系人" class="small">{{ row.contact || '—' }}</td>
+                  <td data-label="资质" class="tiny muted">{{ (row.qualifications || []).join('、') || '—' }}</td>
+                  <td data-label="操作" v-if="writable"><button class="linkbtn" @click="editSupplier(row)">编辑</button></td>
                 </tr>
                 <tr v-if="!suppliers.length"><td colspan="5" class="empty">还没有供应商</td></tr>
               </tbody>
@@ -700,6 +701,9 @@ onMounted(load)
 
 .seg {
   display: inline-flex;
+  /* 窄屏 4 个页签挤不进一行：不给换行的话每个按钮只剩十几像素，中文被
+     压成一列竖排字（实测 375px 下就是这个样子）。允许换行 + 按钮不折字。 */
+  flex-wrap: wrap;
   padding: 2px;
   border-radius: var(--radius-sm);
   background: var(--panel-2);
@@ -713,21 +717,32 @@ onMounted(load)
   border-radius: 4px;
   cursor: pointer;
   font-size: 12px;
+  white-space: nowrap;
 }
-.seg-btn.active { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
+.seg-btn.active { background: var(--accent-soft); color: var(--accent-ink); font-weight: 600; }
 
+/* 顶部三条统计：与 StatCard 同一套读数比例，数字靠右排，
+   读的时候是「先看标签、再看数」两跳，而不是在一行里来回找 */
 .mini-stat {
   display: flex;
   align-items: baseline;
-  gap: 6px;
-  padding: 11px 14px;
-  border: 1px solid var(--line);
+  gap: 8px;
+  padding: 14px 18px;
+  border: 1px solid rgba(0, 0, 0, 0.05);
   border-radius: var(--radius);
   background: var(--panel);
+  box-shadow: var(--shadow);
 }
-.mini-stat strong { font-size: 20px; }
-.mini-stat strong.danger { color: var(--danger); }
-.mini-stat strong.warn { color: var(--warn); }
+:root[data-theme="dark"] .mini-stat { border-color: var(--line); }
+.mini-stat strong {
+  font-size: 26px;
+  font-weight: 640;
+  letter-spacing: -0.03em;
+  line-height: 1.2;
+  margin-left: auto;
+}
+.mini-stat strong.danger { color: var(--danger-ink); }
+.mini-stat strong.warn { color: var(--warn-ink); }
 
 .ok-empty { color: var(--ok); }
 .warnrow td { background: var(--warn-soft); }
@@ -743,7 +758,7 @@ onMounted(load)
 }
 .trace-head h3 { margin: 0; font-size: 13px; font-weight: 600; }
 .linkbtn {
-  border: none; background: none; color: var(--accent); cursor: pointer;
+  border: none; background: none; color: var(--accent-ink); cursor: pointer;
   font-size: 12px; padding: 2px 4px;
 }
 .linkbtn:hover { text-decoration: underline; }

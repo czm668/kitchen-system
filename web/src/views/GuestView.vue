@@ -17,6 +17,7 @@
 import { computed, onMounted, ref } from 'vue'
 import Icon from '../components/Icon.vue'
 import { api } from '../api/client'
+import StateBlock from '../components/StateBlock.vue'
 import { can } from '../stores/auth'
 import { toastError, toastOk, toastWarn } from '../composables/useToast'
 import { fmtDateTime } from '../utils/format'
@@ -31,8 +32,13 @@ const busy = ref(false)
 const checked = ref({})
 const compensation = ref('redo')
 const rejectReason = ref('')
+const rejectCode = ref('evidence_missing')
 const showReject = ref(false)
 const profile = ref(null)
+const quality = ref({ csat: 0, first_response_min: 0, feedback_count: 0, reject_rate: 0 })
+// 质检评分卡：自动分只覆盖可取证的 70 分，服务态度 30 分必须人工补评
+const qa = ref({ count: 0, avg: 0, pass_rate: 0, excellent_rate: 0, coverage: 0.7, grades: {}, top_deductions: [], by_actor: {} })
+const qaGradeClass = { '优秀': 'ok', '良好': 'ok', '合格': 'info', '待改进': 'warn', '不合格': 'danger' }
 
 const FILTERS = [
   { key: 'all', label: '全部' },
@@ -56,7 +62,17 @@ const COMPENSATIONS = [
   { key: 'voucher', label: '代金券' },
   { key: 'priority', label: '加急重做' },
   { key: 'apology', label: '致歉说明' },
-  { key: 'points', label: '积分补偿' },
+  // 项目无会员体系，积分批了也兑不了；保留展示但禁用，与后端硬拦一致
+  { key: 'points', label: '积分补偿（不可用）', disabled: true },
+]
+// 驳回原因码：内部原因填在输入框，顾客只看到对应标准说明
+const REJECT_CODES = [
+  { key: 'evidence_missing', label: '缺少证据' },
+  { key: 'evidence_unclear', label: '证据无法辨认' },
+  { key: 'amount_exceeded', label: '诉求金额超出本单范围' },
+  { key: 'duplicate', label: '重复提交' },
+  { key: 'not_eligible', label: '不符合补偿条件' },
+  { key: 'other', label: '其他' },
 ]
 
 const shown = computed(() => filter.value === 'all'
@@ -76,14 +92,17 @@ function actionText(handling) {
 async function load() {
   loading.value = true
   try {
-    const [stat, list, llm] = await Promise.all([
+    const [stat, list, llm, qc] = await Promise.all([
       api.get('/api/guest/overview'),
       api.get('/api/guest/complaints'),
       api.get('/api/guest/llm-runs?limit=20'),
+      api.get('/api/guest/quality'),
     ])
     overview.value = stat
     complaints.value = list.complaints || []
     runs.value = (llm.runs || []).slice().reverse()
+    quality.value = qc
+    qa.value = qc.qa || qa.value
     if (!complaints.value.some((row) => row.id === selectedId.value)) {
       selectedId.value = complaints.value.length ? complaints.value[0].id : 0
     }
@@ -123,7 +142,11 @@ async function refreshPortrait() {
 function pick(row) {
   selectedId.value = row.id
   checked.value = {}
-  compensation.value = row.method && row.method !== 'none' ? row.method : 'redo'
+  // 默认选中矩阵给出的标准方案，减少「凭感觉选」——管理员可改，偏离会进审计
+  const advice = row.compensation || {}
+  compensation.value = row.method && row.method !== 'none'
+    ? row.method
+    : (advice.suggest || 'redo')
   showReject.value = false
   loadProfile()
 }
@@ -174,8 +197,9 @@ function reject() {
   if (!row) return
   if (!rejectReason.value.trim()) { toastWarn('请填写驳回原因'); return }
   act(`/api/guest/complaints/${row.id}/reject`,
-    { reason: rejectReason.value.trim(), expected_version: row.version },
-    '已驳回，顾客可补充证据后重新提交')
+    { reason: rejectReason.value.trim(), reason_code: rejectCode.value,
+      expected_version: row.version },
+    '已驳回，顾客看到的是标准说明（内部原因只进审计）')
   showReject.value = false
   rejectReason.value = ''
 }
@@ -196,6 +220,20 @@ onMounted(load)
       <span v-if="overview.overdue && overview.overdue.length" class="tag warn">
         SLA 超时 {{ overview.overdue.length }} 单
       </span>
+      <!-- 质检口径：低分与慢响应优先于单量被看到 -->
+      <span v-if="quality.feedback_count" class="tag"
+            :class="quality.csat >= 4 ? 'ok' : 'warn'">
+        满意度 {{ quality.csat }} 分（{{ quality.feedback_count }} 条评价）
+      </span>
+      <span v-if="quality.feedback_count" class="tiny muted">
+        首响中位 {{ quality.first_response_min }} 分
+      </span>
+      <span v-if="quality.low_scores && quality.low_scores.length" class="tag danger">
+        低分待回访 {{ quality.low_scores.length }} 单
+      </span>
+      <span v-if="qa.count" class="tag" :class="qa.avg >= 90 ? 'ok' : qa.avg >= 70 ? 'info' : 'warn'">
+        质检 {{ qa.avg }} 分 · 合格 {{ Math.round(qa.pass_rate * 100) }}%
+      </span>
       <button class="btn ghost sm" type="button" :disabled="loading" @click="load">
         <Icon name="refresh" :size="12" />刷新
       </button>
@@ -213,7 +251,7 @@ onMounted(load)
           <span class="panel-title">客诉工单<span class="panel-sub"> · {{ shown.length }} 条</span></span>
         </div>
         <div class="panel-body tight">
-          <div v-if="loading" class="empty">正在加载…</div>
+          <StateBlock v-if="loading" />
           <div v-else-if="!shown.length" class="empty">暂无工单，可从小程序「智能客服」提交一条。</div>
           <div v-for="row in shown" :key="row.id"
                class="row-item" :class="{ active: row.id === selectedId }" @click="pick(row)">
@@ -309,11 +347,61 @@ onMounted(load)
             <span class="tag plain">{{ ev.kind }}</span>
             <a v-if="ev.kind === 'photo' && ev.url" :href="ev.url" target="_blank"
                class="ev-photo" title="查看原图">
-              <img :src="ev.url" alt="证据图片" />
+              <img :src="ev.url" alt="证据图片" width="44" height="44"
+                   loading="lazy" decoding="async" />
             </a>
             <span class="tiny grow">{{ ev.content }}</span>
             <span v-if="ev.verified" class="tag ok">已核实 {{ ev.verified_by }}</span>
           </label>
+
+          <!-- 补偿建议：分类定方案、级别定上限，管理员不用凭感觉选 -->
+          <div v-if="selected.compensation" class="ai-card" style="margin-top: 12px">
+            <div class="row between">
+              <span class="label">补偿建议 · {{ selected.compensation.tier_label }}</span>
+              <span class="tag plain mono">{{ selected.compensation.cap_label }}</span>
+            </div>
+            <div class="tiny" style="margin-top: 6px">
+              标准方案：<b>{{ (COMPENSATIONS.find(c => c.key === selected.compensation.suggest) || {}).label || selected.compensation.suggest }}</b>
+              <span v-if="selected.compensation.alternatives.length">
+                · 可选：{{ selected.compensation.alternatives.map(k => (COMPENSATIONS.find(c => c.key === k) || {}).label || k).join(' / ') }}
+              </span>
+            </div>
+            <div class="tiny muted" style="margin-top: 4px">
+              {{ selected.compensation.decide_by }}可决 · {{ selected.compensation.tier_desc }}
+            </div>
+            <div v-for="(why, i) in selected.compensation.reasons" :key="i" class="tiny muted">
+              · {{ why }}
+            </div>
+            <div v-if="selected.compensation.chosen" class="tiny" style="margin-top: 6px">
+              已选方案：{{ selected.compensation.chosen_label || selected.compensation.chosen }}
+            </div>
+          </div>
+
+          <!-- 质检评分卡：只评可取证项，服务态度明确交人工 -->
+          <div v-if="selected.qa" class="ai-card" style="margin-top: 12px">
+            <div class="row between">
+              <span class="label">质检评分卡 · 机器可判 {{ Math.round(selected.qa.coverage * 100) }}%</span>
+              <span class="tag" :class="qaGradeClass[selected.qa.grade] || 'plain'">
+                {{ selected.qa.grade }} {{ selected.qa.normalized }} 分
+              </span>
+            </div>
+            <div class="tiny muted" style="margin: 6px 0">
+              自动 {{ selected.qa.score }}/{{ selected.qa.applicable_max }} 分 ·
+              服务态度 30 分待人工补评 · 不是完整质检分
+            </div>
+            <div v-if="selected.qa.deductions.length" class="qa-list">
+              <div v-for="d in selected.qa.deductions" :key="d.id" class="qa-line">
+                <span class="mono">-{{ d.deduct }}</span>
+                <span>{{ d.name }}：{{ d.why }}</span>
+              </div>
+            </div>
+            <div v-else class="tiny" style="color: var(--green, #2f7a5a)">
+              可判项零扣分
+            </div>
+            <div class="tiny muted" style="margin-top: 6px">
+              人工补评：{{ selected.qa.manual_items.map(x => x.name + '(' + x.max + ')').join('、') }}
+            </div>
+          </div>
 
           <!-- 金额：只读 -->
           <div v-if="selected.wants_refund" class="kv-row">
@@ -331,7 +419,8 @@ onMounted(load)
             <!-- 管理员单人直通：选方案后一步核实+终审，无需等组长/另一人 -->
             <template v-if="canResolve && (selected.needs_evidence || selected.needs_approval)">
               <select v-model="compensation" class="select sm">
-                <option v-for="c in COMPENSATIONS" :key="c.key" :value="c.key">{{ c.label }}</option>
+                <option v-for="c in COMPENSATIONS" :key="c.key" :value="c.key"
+                        :disabled="c.disabled">{{ c.label }}</option>
               </select>
               <button class="btn sm primary" :disabled="busy" @click="resolve">
                 单人直通处理
@@ -342,7 +431,8 @@ onMounted(load)
             </template>
             <template v-if="canApprove && selected.needs_approval && !canResolve">
               <select v-model="compensation" class="select sm">
-                <option v-for="c in COMPENSATIONS" :key="c.key" :value="c.key">{{ c.label }}</option>
+                <option v-for="c in COMPENSATIONS" :key="c.key" :value="c.key"
+                        :disabled="c.disabled">{{ c.label }}</option>
               </select>
               <button class="btn sm" :disabled="busy" @click="approve">终审批准</button>
             </template>
@@ -351,8 +441,17 @@ onMounted(load)
                     @click="showReject = !showReject">驳回</button>
           </div>
           <div v-if="showReject" class="actions" style="margin-top: 8px">
-            <input v-model="rejectReason" class="input sm grow" placeholder="驳回原因（必填）" />
+            <select v-model="rejectCode" class="select sm">
+              <option v-for="c in REJECT_CODES" :key="c.key" :value="c.key">{{ c.label }}</option>
+            </select>
+            <input v-model="rejectReason" class="input sm grow"
+                   placeholder="内部原因（管理端与审计可见，不推给顾客）" />
             <button class="btn ghost sm" :disabled="busy" @click="reject">确认驳回</button>
+          </div>
+          <div v-if="showReject" class="tiny muted" style="margin-top: 6px">
+            顾客将收到按「{{
+              (REJECT_CODES.find(c => c.key === rejectCode) || {}).label
+            }}」生成的标准说明（含补证操作与 7 天期限）；上面的内部原因只进审计。
           </div>
           <div v-if="canResolve && (selected.needs_evidence || selected.needs_approval)"
                class="tiny muted" style="margin-top: 8px">
@@ -417,11 +516,11 @@ onMounted(load)
 
 <style scoped>
 .toolbar { display: flex; align-items: center; gap: 9px; flex-wrap: wrap; }
-.seg { display: inline-flex; padding: 2px; border-radius: var(--radius-sm);
+.seg { display: inline-flex; flex-wrap: wrap; padding: 2px; border-radius: var(--radius-sm);
   background: var(--panel); border: 1px solid var(--line); }
 .seg-btn { border: none; background: none; color: var(--muted); padding: 4px 11px;
-  border-radius: 4px; cursor: pointer; font-size: 12px; }
-.seg-btn.active { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
+  border-radius: 4px; cursor: pointer; font-size: 12px; white-space: nowrap; }
+.seg-btn.active { background: var(--accent-soft); color: var(--accent-ink); font-weight: 600; }
 .notice { padding: 9px 14px; border-radius: var(--radius-sm);
   background: var(--accent-soft); color: var(--text); }
 .layout { display: grid; grid-template-columns: 280px minmax(0, 1fr) 260px; gap: 14px; align-items: start; }
@@ -451,4 +550,9 @@ onMounted(load)
 .input.sm { height: 28px; padding: 0 8px; font-size: 12px; }
 .select.sm { height: 28px; padding: 0 6px; font-size: 12px; }
 .run-row { display: flex; align-items: center; gap: 7px; padding: 4px 0; }
+/* 质检扣分明细：每行一条可复核的扣分理由 */
+.qa-list { margin-top: 8px; border-top: 1px solid var(--line); padding-top: 6px; }
+.qa-line { display: flex; gap: 8px; align-items: start; font-size: 12px;
+  line-height: 1.6; padding: 3px 0; color: var(--muted); }
+.qa-line .mono { color: var(--danger); font-weight: 600; flex: none; }
 </style>

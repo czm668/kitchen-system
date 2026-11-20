@@ -251,11 +251,8 @@ onBeforeUnmount(() => { if (timer) clearInterval(timer) })
               </div>
             </div>
           </template>
-          <div v-else class="idle">
-            <span class="muted small">空闲</span>
-            <span v-if="station.reserved_name" class="tiny muted">
-              已预约给 {{ station.reserved_name }}
-            </span>
+          <div v-else-if="station.reserved_name" class="idle small muted">
+            已预约给 {{ station.reserved_name }}
           </div>
           <div v-if="writable" class="st-acts">
             <template v-if="station.occupancy">
@@ -265,12 +262,12 @@ onBeforeUnmount(() => { if (timer) clearInterval(timer) })
               </button>
             </template>
             <template v-else>
-              <select v-model.number="picks[station.id]" class="input xs">
+              <select v-model.number="picks[station.id]" class="input xs" aria-label="选择上灶人员">
                 <option v-for="person in candidates" :key="person.id" :value="person.id">
                   {{ person.name }}{{ person.on_duty ? '' : '（不在岗）' }}
                 </option>
               </select>
-              <button type="button" class="btn sm"
+              <button type="button" class="btn primary sm"
                       :disabled="busy === station.id" @click="occupy(station)">
                 上灶
               </button>
@@ -302,6 +299,7 @@ onBeforeUnmount(() => { if (timer) clearInterval(timer) })
           :option="option" :height="Math.max(160, stationRows.length * 54 + 60)"
           :is-empty="!segments.length"
           empty="还没有上灶记录。派单后刷卡上灶（或点「上灶」）才会出现在这里。"
+          label="工位占用时间轴：每个工位一行，色块表示该时段被哪位厨师占用"
         />
       </div>
     </section>
@@ -316,23 +314,23 @@ onBeforeUnmount(() => { if (timer) clearInterval(timer) })
         <div v-if="!handovers.length" class="empty">
           没有转派记录。离岗转派（#11）触发时，每一次换人都会留一条。
         </div>
-        <table v-else class="table">
+        <table aria-label="表格：时间、订单、子项、原因、操作人" v-else class="table cards">
           <thead>
             <tr>
-              <th style="width: 86px">时间</th>
-              <th style="width: 110px">订单</th>
-              <th style="width: 70px" class="num">子项</th>
-              <th>原因</th>
-              <th style="width: 96px">操作人</th>
+              <th scope="col" style="width: 86px">时间</th>
+              <th scope="col" style="width: 110px">订单</th>
+              <th scope="col" style="width: 70px" class="num">子项</th>
+              <th scope="col">原因</th>
+              <th scope="col" style="width: 96px">操作人</th>
             </tr>
           </thead>
           <tbody>
             <tr v-for="(row, i) in handovers" :key="i">
-              <td class="mono tiny">{{ fmtTime(row.ts) }}</td>
-              <td class="mono small">{{ row.order_no }}</td>
-              <td class="num mono tiny">#{{ row.item_id ?? '—' }}</td>
-              <td class="pre-wrap">{{ row.reason }}</td>
-              <td class="small">{{ row.actor || '—' }}</td>
+              <td data-label="时间" class="mono tiny">{{ fmtTime(row.ts) }}</td>
+              <td data-label="订单" class="mono small">{{ row.order_no }}</td>
+              <td data-label="子项" class="num mono tiny">#{{ row.item_id ?? '—' }}</td>
+              <td data-label="原因" class="pre-wrap">{{ row.reason }}</td>
+              <td data-label="操作人" class="small">{{ row.actor || '—' }}</td>
             </tr>
           </tbody>
         </table>
@@ -342,14 +340,18 @@ onBeforeUnmount(() => { if (timer) clearInterval(timer) })
 </template>
 
 <style scoped>
-.station.busy { border-color: var(--warn); }
-.station.reserved { border-color: var(--accent); }
+/* 占用态用左侧色条表示，不整圈染边框：两张工位卡并排时，
+   整圈红/橙边会显得像两条警告横幅，而这里只是「有人在用」。 */
+.station { border-left: 3px solid var(--line-strong); transition: border-color 160ms ease; }
+.station.busy { border-left-color: var(--warn); }
+.station.reserved { border-left-color: var(--accent); }
 
 .occ { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
 .occ-main { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
-.occ-meta { display: flex; align-items: center; gap: 8px; font-size: 12px; }
-.idle { display: flex; align-items: center; justify-content: space-between; }
-.flame-text { margin: 8px 0 0; }
-.st-acts { display: flex; align-items: center; gap: 6px; margin-top: 8px; }
-.st-acts .input.xs { width: auto; min-width: 104px; flex: 1; text-align: left; }
+.occ-main strong { font-size: var(--fs-md); }
+.occ-meta { display: flex; align-items: center; gap: 8px; font-size: var(--fs-xs); }
+.idle { margin-bottom: 2px; }
+.flame-text { margin: 10px 0 0; line-height: 1.5; }
+.st-acts { display: flex; align-items: center; gap: 8px; }
+.st-acts .input.xs { width: auto; min-width: 110px; max-width: 260px; flex: 0 1 260px; height: 32px; text-align: left; }
 </style>

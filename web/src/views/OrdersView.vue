@@ -23,6 +23,7 @@ import { computed, onMounted, ref } from 'vue'
 import ConfirmDialog from '../components/ConfirmDialog.vue'
 import Icon from '../components/Icon.vue'
 import { api } from '../api/client'
+import StateBlock from '../components/StateBlock.vue'
 import { can } from '../stores/auth'
 import { toastError, toastOk, toastWarn } from '../composables/useToast'
 import {
@@ -224,22 +225,22 @@ onMounted(load)
           <span v-if="!writable" class="tag plain">只读</span>
         </div>
         <div class="panel-body tight">
-          <div v-if="loading" class="empty">正在加载…</div>
+          <StateBlock v-if="loading" />
           <div v-else-if="!shown.length" class="empty">
             没有符合条件的订单。点「生成演示订单」造几单，或从小程序下单。
           </div>
-          <table v-else class="table">
+          <table aria-label="表格：订单、状态、子项、交期" v-else class="table cards">
             <thead>
               <tr>
-                <th style="width: 112px">订单</th>
-                <th style="width: 78px">状态</th>
-                <th>子项</th>
-                <th style="width: 108px" class="num">交期</th>
+                <th scope="col" style="width: 112px">订单</th>
+                <th scope="col" style="width: 78px">状态</th>
+                <th scope="col">子项</th>
+                <th scope="col" style="width: 108px" class="num">交期</th>
               </tr>
             </thead>
             <tbody>
               <tr v-for="order in shown" :key="order.id">
-                <td>
+                <td data-label="订单">
                   <div class="mono bold">{{ order.order_no }}</div>
                   <div class="tiny muted">
                     {{ fmtTime(order.created_at) }} · {{ sourceLabel(order.source) }}
@@ -248,12 +249,12 @@ onMounted(load)
                     </template>
                   </div>
                 </td>
-                <td>
+                <td data-label="状态">
                   <span class="tag" :class="describe(ORDER_STATE, order.state).tone">
                     {{ describe(ORDER_STATE, order.state).label }}
                   </span>
                 </td>
-                <td>
+                <td data-label="子项">
                   <div v-for="item in order.items" :key="item.id" class="item-row">
                     <div class="item-main">
                       <span class="dish">{{ item.dish_name }}×{{ item.qty }}</span>
@@ -308,7 +309,7 @@ onMounted(load)
                     </div>
                   </div>
                 </td>
-                <td class="num">
+                <td data-label="交期" class="num">
                   <div class="mono small">{{ fmtDateTime(order.due_at) }}</div>
                   <div class="tiny muted">{{ fmtCountdown(order.due_at) }}</div>
                 </td>
@@ -325,7 +326,7 @@ onMounted(load)
           <span class="panel-sub">{{ dishes.filter((d) => d.sold_out).length }} 项沽清</span>
         </div>
         <div class="panel-body tight scroll">
-          <table class="table">
+          <table class="table" aria-label="表格：菜品与沽清状态">
             <tbody>
               <tr v-for="dish in dishes" :key="dish.id" :class="{ soldout: dish.sold_out }">
                 <td>
@@ -368,23 +369,28 @@ onMounted(load)
 .toolbar { display: flex; align-items: center; gap: 9px; flex-wrap: wrap; }
 .seg {
   display: inline-flex;
-  padding: 2px;
-  border-radius: var(--radius-sm);
+  padding: 3px;
+  border-radius: 8px;
   background: var(--panel);
   border: 1px solid var(--line);
+  gap: 2px;
 }
 .seg-btn {
   border: none;
   background: none;
   color: var(--muted);
-  padding: 4px 11px;
-  border-radius: 4px;
+  padding: 5px 12px;
+  border-radius: 6px;
   cursor: pointer;
-  font-size: 12px;
+  font-size: var(--fs-xs);
+  font-weight: 500;
+  transition: background 130ms ease, color 130ms ease;
 }
-.seg-btn.active { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
+.seg-btn:hover { color: var(--text); }
+.seg-btn.active { background: var(--accent-soft); color: var(--accent-ink); font-weight: 600; }
 
-.layout { display: grid; grid-template-columns: minmax(0, 1fr) 268px; gap: 14px; align-items: start; }
+/* 右栏 268px 装不下「菜名 + 编码 + 时长 + 沽清按钮」，字号上调后必须放量 */
+.layout { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: var(--sp-4); align-items: start; }
 @media (max-width: 1120px) { .layout { grid-template-columns: minmax(0, 1fr); } }
 
 .item-row {
@@ -392,17 +398,17 @@ onMounted(load)
   align-items: center;
   gap: 9px;
   flex-wrap: wrap;
-  padding: 3px 0;
+  padding: 4px 0;
 }
 .item-main { display: flex; align-items: center; gap: 7px; flex-wrap: wrap; min-width: 0; }
 .dish { font-weight: 500; }
-.item-actions { display: flex; align-items: center; gap: 5px; margin-left: auto; }
-.select.mini { height: 25px; width: 74px; padding: 0 5px; font-size: 11.5px; }
-.danger-text { color: var(--danger); }
+.item-actions { display: flex; align-items: center; gap: 6px; margin-left: auto; flex-wrap: wrap; justify-content: flex-end; }
+.select.mini { height: 28px; width: 80px; padding: 0 6px; font-size: var(--fs-xs); }
+.danger-text { color: var(--danger-ink); }
 
-.dishes .panel-body { max-height: 420px; }
+/* 沽清表不再框死 420px：字号上调后 6 个菜品会溢出，最后一行被裁一半。
+   菜品总数有限，让它自然展开比固定高度更稳。 */
+.dishes .panel-body { max-height: min(520px, 56vh); }
 tr.soldout td { opacity: 0.55; }
 tr.soldout .bold { text-decoration: line-through; }
-
-.panel-foot { padding: 9px 15px; border-top: 1px solid var(--line); }
 </style>

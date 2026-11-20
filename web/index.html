@@ -4,7 +4,24 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="color-scheme" content="dark light" />
+    <!-- 之前没有图标，浏览器每次加载都会请求 /favicon.ico 拿一个 404，
+         控制台留一条红字，标签页还是一个地球。 -->
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <title>后厨智能调度与食安合规管理系统</title>
+    <!--
+      在样式表之前定下主题。主题存在 localStorage 里，而 Vue 要到挂载时才读，
+      中间这段时间用户看到的是下面那段启动屏——不提前定主题的话，浅色用户
+      每次打开都会先闪一下深色屏。
+      用 try/catch 包住：隐私模式下访问 localStorage 会抛异常，不能让它
+      连带把后面的启动搞挂。
+    -->
+    <script>
+      try {
+        if (localStorage.getItem('kitchen.theme') === 'dark') {
+          document.documentElement.setAttribute('data-theme', 'dark')
+        }
+      } catch (e) { /* localStorage 不可用就用默认浅色 */ }
+    </script>
   </head>
   <body>
     <!-- 首屏骨架：JS 还没下载完时先显示这个，避免白屏。
@@ -28,12 +45,17 @@
         height: 100vh; display: flex; flex-direction: column;
         align-items: center; justify-content: center; gap: 18px;
         font-family: system-ui, -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif;
-        background: #101114; color: #8a8f98; font-size: 13px; letter-spacing: .08em;
+        /* 跟随主题：深色是既有的深灰，浅色用与 --bg 同色，避免"先深后浅"的闪屏 */
+        background: #f5f5f7; color: #6b6b70; font-size: 13px; letter-spacing: .08em;
       }
+      :root[data-theme="dark"] .boot { background: #101114; color: #8a8f98; }
       .boot-mark {
         width: 34px; height: 34px; border-radius: 8px;
-        border: 2px solid #2a2e35; border-top-color: #8a8f98;
+        border: 2px solid #d2d2d7; border-top-color: #6b6b70;
         animation: boot-spin 900ms linear infinite;
+      }
+      :root[data-theme="dark"] .boot-mark {
+        border-color: #2a2e35; border-top-color: #8a8f98;
       }
       @keyframes boot-spin { to { transform: rotate(360deg); } }
     </style>

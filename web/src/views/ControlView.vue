@@ -32,6 +32,7 @@ import Icon from '../components/Icon.vue'
 import { api } from '../api/client'
 import { can } from '../stores/auth'
 import { channels, live, refresh } from '../stores/live'
+import StateBlock from '../components/StateBlock.vue'
 import { toastError, toastOk, toastWarn } from '../composables/useToast'
 import { fmtDateTime, fmtInt, CHANNEL_STATE } from '../utils/format'
 
@@ -325,10 +326,12 @@ watch(() => live.overview?.time_scale, (next) => {
 </script>
 
 <template>
-  <div v-if="loading" class="stack">
-    <div class="panel skeleton" style="height: 160px"></div>
-    <div class="panel skeleton" style="height: 240px"></div>
-  </div>
+  <StateBlock v-if="loading" class="stack" title="正在加载控制面板与参数">
+    <template #skeleton>
+      <div class="panel skeleton" style="height: 160px"></div>
+      <div class="panel skeleton" style="height: 240px"></div>
+    </template>
+  </StateBlock>
 
   <div v-else class="stack">
     <!-- ---------------------------------------------------------- 三通道 -->
@@ -362,12 +365,14 @@ watch(() => live.overview?.time_scale, (next) => {
           </div>
 
           <div class="chan-acts">
+            <!-- 隔离动作给完整 34px 尺寸，恢复动作降为 sm：
+                 两者并排时，「关阀」必须比「复位」更容易点中，也更容易看见 -->
             <button
               v-for="act in actionsOf(row.name)"
               :key="act.action"
               type="button"
-              class="btn sm"
-              :class="act.kind === 'restore' ? 'ghost' : 'danger'"
+              class="btn"
+              :class="act.kind === 'restore' ? 'ghost sm' : 'danger'"
               :disabled="!!busy"
               @click="askAction(act.action, act.label)"
             >
@@ -502,23 +507,23 @@ watch(() => live.overview?.time_scale, (next) => {
         </div>
       </div>
       <div class="panel-body">
-        <table class="table">
+        <table aria-label="表格：判据项、设计值、当前生效、说明" class="table cards">
           <thead>
             <tr>
-              <th>判据项</th>
-              <th class="num">设计值</th>
-              <th class="num">当前生效</th>
-              <th>说明</th>
+              <th scope="col">判据项</th>
+              <th scope="col" class="num">设计值</th>
+              <th scope="col" class="num">当前生效</th>
+              <th scope="col">说明</th>
             </tr>
           </thead>
           <tbody>
             <tr v-for="row in params.demo_map.rows" :key="row.item">
-              <td>{{ row.item }}</td>
-              <td class="num mono">{{ row.real_text }}</td>
-              <td class="num mono" :class="{ 'warn-text': row.effective_sec !== row.real_sec }">
+              <td data-label="判据项">{{ row.item }}</td>
+              <td data-label="设计值" class="num mono">{{ row.real_text }}</td>
+              <td data-label="当前生效" class="num mono" :class="{ 'warn-text': row.effective_sec !== row.real_sec }">
                 {{ row.effective_text }}
               </td>
-              <td class="tiny muted">{{ row.note }}</td>
+              <td data-label="说明" class="tiny muted">{{ row.note }}</td>
             </tr>
           </tbody>
         </table>
@@ -553,44 +558,44 @@ watch(() => live.overview?.time_scale, (next) => {
 
       <div class="panel-body">
         <p v-if="!canParam" class="tiny warn-text">当前角色只读，无法修改阈值。</p>
-        <table class="table">
+        <table aria-label="表格：规则、指标、类型、下限、上限、时长(s)、时间窗(s)、等级" class="table cards">
           <thead>
             <tr>
-              <th>规则</th>
-              <th>指标</th>
-              <th>类型</th>
-              <th class="num">下限</th>
-              <th class="num">上限</th>
-              <th class="num">时长(s)</th>
-              <th class="num">时间窗(s)</th>
-              <th class="num">等级</th>
-              <th>启用</th>
+              <th scope="col">规则</th>
+              <th scope="col">指标</th>
+              <th scope="col">类型</th>
+              <th scope="col" class="num">下限</th>
+              <th scope="col" class="num">上限</th>
+              <th scope="col" class="num">时长(s)</th>
+              <th scope="col" class="num">时间窗(s)</th>
+              <th scope="col" class="num">等级</th>
+              <th scope="col">启用</th>
             </tr>
           </thead>
           <tbody>
             <tr v-for="row in rows" :key="row.id" :class="{ dirty: isDirty(row) }">
-              <td class="mono small">{{ row.id }}</td>
-              <td>
+              <td data-label="规则" class="mono small">{{ row.id }}</td>
+              <td data-label="指标">
                 <div class="small">{{ metricLabel(row.metric) }}</div>
                 <div class="tiny dim mono">{{ row.metric }} <span v-if="unitOf(row.metric)">{{ unitOf(row.metric) }}</span></div>
               </td>
-              <td class="small">{{ KIND_LABEL[row.kind] || row.kind }}</td>
-              <td class="num"><input v-model.number="row.lower_bound" type="number" step="0.1"
+              <td data-label="类型" class="small">{{ KIND_LABEL[row.kind] || row.kind }}</td>
+              <td data-label="下限" class="num"><input v-model.number="row.lower_bound" type="number" step="0.1"
                                      class="input xs" :disabled="!canParam" /></td>
-              <td class="num"><input v-model.number="row.upper_bound" type="number" step="0.1"
+              <td data-label="上限" class="num"><input v-model.number="row.upper_bound" type="number" step="0.1"
                                      class="input xs" :disabled="!canParam" /></td>
-              <td class="num"><input v-model.number="row.duration_sec" type="number" step="1"
+              <td data-label="时长(s)" class="num"><input v-model.number="row.duration_sec" type="number" step="1"
                                      class="input xs" :disabled="!canParam" /></td>
-              <td class="num"><input v-model.number="row.window_sec" type="number" step="1"
+              <td data-label="时间窗(s)" class="num"><input v-model.number="row.window_sec" type="number" step="1"
                                      class="input xs" :disabled="!canParam" /></td>
-              <td class="num">
+              <td data-label="等级" class="num">
                 <select v-model.number="row.level" class="input xs" :disabled="!canParam">
                   <option :value="1">1</option>
                   <option :value="2">2</option>
                   <option :value="3">3</option>
                 </select>
               </td>
-              <td>
+              <td data-label="启用">
                 <!-- 配置里 enabled 是 0/1（不是 true/false）：用 true-value 保住类型，
                      否则存回去变成布尔值，`changed` 里会多出一条「1 → true」的假改动 -->
                 <input v-model="row.enabled" type="checkbox" :true-value="1" :false-value="0"
@@ -678,34 +683,38 @@ watch(() => live.overview?.time_scale, (next) => {
 <style scoped>
 .stack { display: flex; flex-direction: column; gap: 14px; }
 
-/* ------------------------------------------------------------ 通道卡片 */
+/* 联锁时不再整圈染红、也不整块染底：整块 red 在深色主题下会糊成土褐色方块，
+   按钮反而被吃掉。改成「中性卡片 + 左侧 3px 状态条」——危险仍一眼可见，
+   而卡片里的按钮始终是这块区域里最亮的东西。 */
 .chan {
   border: 1px solid var(--line);
-  border-radius: var(--radius);
-  padding: 12px;
-  background: var(--panel-2);
+  border-left: 3px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  padding: 13px 14px;
+  background: var(--surface-2);
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 9px;
   min-width: 0;
+  transition: border-color 160ms ease, background 160ms ease;
 }
-.chan.danger { border-color: var(--danger); background: var(--danger-soft); }
-.chan.warn { border-color: var(--warn); background: var(--warn-soft); }
+.chan.danger { border-left-color: var(--danger); }
+.chan.warn { border-left-color: var(--warn); }
 
-.chan-head { display: flex; align-items: center; gap: 7px; font-size: 12.5px; }
-.chan-head strong { flex: 1; min-width: 0; }
+.chan-head { display: flex; align-items: center; gap: 8px; font-size: var(--fs-sm); }
+.chan-head strong { flex: 1; min-width: 0; font-size: var(--fs-base); }
 .chan-src { display: flex; align-items: center; gap: 5px; flex-wrap: wrap; }
 .chip {
   padding: 1px 6px;
   border-radius: 999px;
   background: var(--panel);
   border: 1px solid var(--line);
-  font-size: 10.5px;
+  font-size: var(--fs-2xs);
 }
-.chan-acts { display: flex; flex-wrap: wrap; gap: 6px; }
+.chan-acts { display: flex; flex-wrap: wrap; gap: 7px; }
 .review {
   display: flex; align-items: center; justify-content: space-between; gap: 8px;
-  padding-top: 7px; border-top: 1px dashed var(--line);
+  padding-top: 8px; border-top: 1px dashed var(--line);
 }
 
 .signal-row {

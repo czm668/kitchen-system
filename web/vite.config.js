@@ -30,9 +30,11 @@ export default defineConfig({
     chunkSizeWarningLimit: 900,
     rollupOptions: {
       output: {
-        // ECharts 单独一个 chunk：它占 700KB+，和业务代码混在一起会让
-        // 首屏必须等它下载完才能渲染壳
-        manualChunks: { echarts: ['echarts'] },
+        // 这里**故意不再配 manualChunks**。
+        // 早先写了 `{ echarts: ['echarts'] }`，以为能把图表库拆出首屏——拆是拆开了，
+        // 但 ChartPanel 顶层还是静态 import，浏览器照样得在执行入口前下完它。
+        // 真正把 ECharts 移出关键路径的是 `utils/echarts-setup.js` 这个动态 import
+        // 的模块，Rollup 会自己为它切一个 chunk，不需要也不该在这里再指定一次。
       },
     },
   },

@@ -13,6 +13,7 @@
  */
 import { computed, onMounted, ref } from 'vue'
 import { api } from '../api/client'
+import StateBlock from '../components/StateBlock.vue'
 import { can } from '../stores/auth'
 import { toastError } from '../composables/useToast'
 
@@ -126,8 +127,7 @@ onMounted(load)
       <span>异常归因不关阀 · 派单建议不下发 · 合规问答不改门禁。派单/关阀/门禁/退款仍由规则与权限层裁决。</span>
     </div>
 
-    <div v-if="loading" class="loading">正在加载 AI 面板…</div>
-
+    <StateBlock v-if="loading" title="正在加载 AI 面板" />
     <template v-else>
       <!-- 汇总卡 -->
       <div class="stat-row">
@@ -284,37 +284,48 @@ onMounted(load)
 </template>
 
 <style scoped>
-.ai-view { display: flex; flex-direction: column; gap: 14px; }
+.ai-view { display: flex; flex-direction: column; gap: var(--sp-4); }
 .boundary-banner {
   display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px;
-  padding: 10px 14px; border-radius: var(--radius-sm);
+  padding: 12px 16px; border-radius: var(--radius-sm);
   background: var(--accent-soft); border: 1px solid var(--line);
-  color: var(--text); font-size: 12px;
+  border-left: 3px solid var(--accent);
+  color: var(--text); font-size: var(--fs-sm); line-height: 1.6;
 }
-.boundary-banner strong { color: var(--accent); }
+.boundary-banner strong { color: var(--accent-ink); }
 .boundary-banner span { color: var(--text-2); }
 .loading { padding: 40px; text-align: center; color: var(--muted); }
-.stat-row { display: flex; flex-wrap: wrap; gap: 10px; }
+.stat-row { display: flex; flex-wrap: wrap; gap: 12px; }
+/* 六格概览与 StatCard 同一套读数比例，跨页看到的是同一种「数字长什么样」 */
 .stat {
-  flex: 1 1 120px; display: flex; flex-direction: column; gap: 4px;
-  padding: 12px 14px; background: var(--panel); border: 1px solid var(--line);
-  border-radius: var(--radius-sm);
-}
-.stat .k { font-size: 11px; color: var(--muted); }
-.stat .v { font-size: 20px; }
-.stat .v.small { font-size: 13px; }
-.panel {
-  padding: 14px 16px; background: var(--panel); border: 1px solid var(--line);
+  flex: 1 1 128px; display: flex; flex-direction: column; gap: 5px;
+  padding: 14px 16px;
+  background: var(--panel);
+  border: 1px solid rgba(0, 0, 0, 0.05);
   border-radius: var(--radius);
+  box-shadow: var(--shadow);
 }
-.panel h2 { font-size: 14px; margin: 0 0 12px; }
-.scenario-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 10px; }
+:root[data-theme="dark"] .stat { border-color: var(--line); }
+.stat .k { font-size: var(--fs-xs); color: var(--muted); font-weight: 500; }
+.stat .v { font-size: 24px; font-weight: 640; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; line-height: 1.2; }
+.stat .v.small { font-size: var(--fs-base); font-weight: 600; letter-spacing: 0; }
+/* 这一页 .panel 直接装内容（不套 panel-body），内边距落在卡片上 */
+.panel {
+  padding: 18px;
+  background: var(--panel);
+  border: 1px solid rgba(0, 0, 0, 0.05);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+}
+:root[data-theme="dark"] .panel { border-color: var(--line); }
+.panel h2 { font-size: var(--fs-md); margin: 0 0 14px; }
+.scenario-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 10px; }
 .scenario-card {
-  padding: 11px 12px; border: 1px solid var(--line); border-radius: var(--radius-sm);
-  background: var(--panel-2); display: flex; flex-direction: column; gap: 6px;
+  padding: 12px 13px; border: 1px solid var(--line); border-radius: var(--radius-sm);
+  background: var(--surface-2); display: flex; flex-direction: column; gap: 6px;
 }
-.scenario-card.is-new { border-color: var(--accent); }
-.sc-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 12.5px; }
+.scenario-card.is-new { border-color: var(--accent-line); background: var(--accent-soft); }
+.sc-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: var(--fs-sm); font-weight: 600; }
 .sc-nums { display: flex; flex-wrap: wrap; gap: 10px; color: var(--text-2); }
 .sc-bound { color: var(--text-2); }
 .sc-ver { color: var(--muted); }
@@ -325,7 +336,7 @@ onMounted(load)
   padding: 6px 12px; border: 1px solid var(--line); border-radius: var(--radius-sm);
   background: var(--panel-2); color: var(--text-2); cursor: pointer; font-size: 12px;
 }
-.advice-tabs button.active, .advice-tabs button:hover { color: var(--accent); border-color: var(--accent); }
+.advice-tabs button.active, .advice-tabs button:hover { color: var(--accent-ink); border-color: var(--accent); }
 .advice-forms { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 14px; }
 .advice-form { display: flex; flex-direction: column; gap: 10px; }
 .advice-form h3 { font-size: 12.5px; margin: 0; color: var(--text-2); }
@@ -346,7 +357,7 @@ onMounted(load)
 .result-foot { color: var(--muted); }
 .runs { display: flex; flex-direction: column; gap: 6px; }
 .run-row { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: 6px 0; border-bottom: 1px solid var(--line); }
-.tag.accent { color: var(--accent); border-color: var(--accent); }
+.tag.accent { color: var(--accent-ink); border-color: var(--accent); }
 .tag.ok { color: var(--ok); border-color: var(--ok); }
 .tag.danger { color: var(--danger); border-color: var(--danger); }
 .warn-text { color: var(--warn); }

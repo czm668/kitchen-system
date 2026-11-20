@@ -18,6 +18,7 @@
 import { computed, onMounted, ref } from 'vue'
 import Icon from '../components/Icon.vue'
 import { api } from '../api/client'
+import StateBlock from '../components/StateBlock.vue'
 import { can } from '../stores/auth'
 import { toastError, toastOk } from '../composables/useToast'
 import { fmt } from '../utils/format'
@@ -172,7 +173,7 @@ onMounted(load)
         </button>
       </div>
       <div class="panel-body tight scroll">
-        <div v-if="loading" class="empty">加载中…</div>
+        <StateBlock v-if="loading" />
         <button
           v-for="row in recipes" :key="row.dish_id" type="button"
           class="dish-item" :class="{ active: row.dish_id === selectedDish }"
@@ -235,40 +236,40 @@ onMounted(load)
 
           <div class="panel-body">
             <h3 class="section-title">配料与称重区间</h3>
-            <table class="table">
+            <table aria-label="表格：配料、目标 (g)、容差 (%)、合格区间" class="table cards">
               <thead>
                 <tr>
-                  <th>配料</th>
-                  <th class="num" style="width: 120px">目标 (g)</th>
-                  <th class="num" style="width: 96px">容差 (%)</th>
-                  <th class="num" style="width: 130px">合格区间</th>
-                  <th v-if="writable" style="width: 40px"></th>
+                  <th scope="col">配料</th>
+                  <th scope="col" class="num" style="width: 120px">目标 (g)</th>
+                  <th scope="col" class="num" style="width: 96px">容差 (%)</th>
+                  <th scope="col" class="num" style="width: 130px">合格区间</th>
+                  <th scope="col" v-if="writable" style="width: 40px"></th>
                 </tr>
               </thead>
               <tbody>
                 <tr v-for="(item, index) in draft?.items || []" :key="index">
-                  <td>
+                  <td data-label="配料">
                     <input
                       v-if="writable" v-model="item.ingredient"
                       class="input" style="width: 100%" placeholder="配料名，如 猪里脊"
                     />
                     <span v-else>{{ item.ingredient }}</span>
                   </td>
-                  <td class="num">
+                  <td data-label="目标 (g)" class="num">
                     <input
                       v-if="writable" v-model.number="item.weight_g"
                       class="input num mini" type="number" min="1" step="1"
                     />
                     <span v-else class="mono">{{ fmt(item.weight_g, { digits: 0 }) }}</span>
                   </td>
-                  <td class="num">
+                  <td data-label="容差 (%)" class="num">
                     <input
                       v-if="writable" v-model.number="item.tolerance_pct"
                       class="input num mini" type="number" min="1" max="50" step="1"
                     />
                     <span v-else class="mono">{{ fmt(item.tolerance_pct, { digits: 0 }) }}</span>
                   </td>
-                  <td class="num mono tiny muted">
+                  <td data-label="合格区间" class="num mono tiny muted">
                     {{ item.min_g != null
                       ? `${fmt(item.min_g, { digits: 1 })} ~ ${fmt(item.max_g, { digits: 1 })}` : '—' }}
                   </td>
@@ -286,21 +287,21 @@ onMounted(load)
             </div>
 
             <h3 class="section-title" style="margin-top: 18px">制作工序</h3>
-            <table class="table">
+            <table aria-label="表格：序、工序、火候、时长 (s)、标记" class="table cards">
               <thead>
                 <tr>
-                  <th style="width: 52px" class="num">序</th>
-                  <th>工序</th>
-                  <th style="width: 92px">火候</th>
-                  <th class="num" style="width: 96px">时长 (s)</th>
-                  <th style="width: 130px">标记</th>
-                  <th v-if="writable" style="width: 96px"></th>
+                  <th scope="col" style="width: 52px" class="num">序</th>
+                  <th scope="col">工序</th>
+                  <th scope="col" style="width: 92px">火候</th>
+                  <th scope="col" class="num" style="width: 96px">时长 (s)</th>
+                  <th scope="col" style="width: 130px">标记</th>
+                  <th scope="col" v-if="writable" style="width: 96px"></th>
                 </tr>
               </thead>
               <tbody>
                 <tr v-for="(step, index) in draft?.steps || []" :key="index">
-                  <td class="num mono tiny">{{ index + 1 }}</td>
-                  <td>
+                  <td data-label="序" class="num mono tiny">{{ index + 1 }}</td>
+                  <td data-label="工序">
                     <template v-if="writable">
                       <input
                         v-model="step.title" class="input" style="width: 100%"
@@ -316,7 +317,7 @@ onMounted(load)
                       <div class="tiny muted pre-wrap">{{ step.instruction }}</div>
                     </template>
                   </td>
-                  <td>
+                  <td data-label="火候">
                     <select v-if="writable" v-model="step.heat_level" class="input" style="width: 100%">
                       <option value="none">无火</option>
                       <option value="low">小火</option>
@@ -325,14 +326,14 @@ onMounted(load)
                     </select>
                     <span v-else class="small">{{ HEAT_LABEL[step.heat_level] || '—' }}</span>
                   </td>
-                  <td class="num">
+                  <td data-label="时长 (s)" class="num">
                     <input
                       v-if="writable" v-model.number="step.duration_sec"
                       class="input num mini" type="number" min="0" step="5"
                     />
                     <span v-else class="mono">{{ step.duration_sec }}</span>
                   </td>
-                  <td>
+                  <td data-label="标记">
                     <template v-if="writable">
                       <label class="tiny" style="display: flex; align-items: center; gap: 4px">
                         <input v-model="step.ccp" type="checkbox" /> CCP
@@ -394,21 +395,21 @@ onMounted(load)
             <span class="panel-sub">{{ (current.versions || []).length }} 个版本</span>
           </div>
           <div class="panel-body tight">
-            <table class="table">
+            <table aria-label="表格：版本、配料、工序、状态" class="table cards">
               <thead>
                 <tr>
-                  <th style="width: 70px">版本</th>
-                  <th class="num" style="width: 70px">配料</th>
-                  <th class="num" style="width: 70px">工序</th>
-                  <th style="width: 90px">状态</th>
+                  <th scope="col" style="width: 70px">版本</th>
+                  <th scope="col" class="num" style="width: 70px">配料</th>
+                  <th scope="col" class="num" style="width: 70px">工序</th>
+                  <th scope="col" style="width: 90px">状态</th>
                 </tr>
               </thead>
               <tbody>
                 <tr v-for="ver in [...(current.versions || [])].reverse()" :key="ver.id">
-                  <td class="mono">v{{ ver.version }}</td>
-                  <td class="num mono">{{ ver.items }}</td>
-                  <td class="num mono">{{ ver.steps }}</td>
-                  <td>
+                  <td data-label="版本" class="mono">v{{ ver.version }}</td>
+                  <td data-label="配料" class="num mono">{{ ver.items }}</td>
+                  <td data-label="工序" class="num mono">{{ ver.steps }}</td>
+                  <td data-label="状态">
                     <span class="tag" :class="ver.id === current.recipe.id ? 'ok' : 'plain'">
                       {{ ver.id === current.recipe.id ? '当前生效' : '历史' }}
                     </span>
@@ -428,12 +429,21 @@ onMounted(load)
    右列配方再长，往下滚时菜品列表也一直钉在可视区里。
    sticky 相对滚动容器 .content 生效，top 对齐内容区内边距（16px）；
    列表超过一屏时面板内部自滚（.scroll），文档永不滚。
-   窄屏单列堆叠时关闭吸顶（否则列表会压住下面的详情）。 */
-.layout { display: grid; grid-template-columns: 236px minmax(0, 1fr); gap: 14px; align-items: start; }
-@media (max-width: 1000px) { .layout { grid-template-columns: minmax(0, 1fr); } .list { position: static; } }
 
+   ⚠ 基准规则必须写在媒体查询**前面**：同优先级下后者胜，之前把
+   `.list { position: sticky }` 写在 `@media (max-width: 1000px)` 之后，
+   窄屏的 `position: static` 直接被它盖掉——375px 下滚到配方区，菜品列表
+   会钉在顶部、把下面的配料表压住。 */
 .list { position: sticky; top: 16px; }
 .list .panel-body { max-height: calc(100vh - 130px); }
+.layout { display: grid; grid-template-columns: 236px minmax(0, 1fr); gap: 14px; align-items: start; }
+@media (max-width: 1000px) {
+  .layout { grid-template-columns: minmax(0, 1fr); }
+  /* 单列时关掉吸顶，并把列表压到半屏以内：否则第一屏只有菜品列表，
+     配方详情要滑很久才看得到。 */
+  .list { position: static; }
+  .list .panel-body { max-height: 46vh; }
+}
 /* 列表面板底部的「新增菜品」入口 */
 .new-dish { padding: 10px 12px; border-top: 1px solid var(--line); }
 /* 工序行的上移/下移/删除按钮组 */

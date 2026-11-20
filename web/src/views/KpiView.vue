@@ -245,44 +245,14 @@ onBeforeUnmount(() => { if (timer) clearInterval(timer) })
       />
     </div>
 
-    <div class="grid grid-2">
-      <!-- 出餐时长 -->
-      <section class="panel">
-        <div class="panel-head">
-          <span class="panel-title">出餐时长<span class="panel-sub"> · 派单到出餐，单位秒</span></span>
-        </div>
-        <div class="panel-body">
-          <ChartPanel
-            :option="cookOption" :height="180"
-            :is-empty="kpi?.cook_duration?.samples === 0"
-            empty="还没有完成出餐的订单（先去订单页造一单并走完流程）"
-          />
-        </div>
-      </section>
-
-      <!-- 消毒达标率 -->
-      <section class="panel">
-        <div class="panel-head">
-          <span class="panel-title">消毒达标率<span class="panel-sub"> · 已结束会话中达标占比</span></span>
-        </div>
-        <div class="panel-body">
-          <ChartPanel
-            :option="disinfectOption" :height="180"
-            :is-empty="kpi?.disinfection?.samples === 0"
-            empty="还没有已结束的消毒会话"
-          />
-        </div>
-      </section>
-    </div>
-
-    <div class="grid grid-2">
+    <div class="grid grid-2 mid">
       <!-- 三通道 -->
       <section class="panel">
         <div class="panel-head">
           <span class="panel-title">三通道运行状态</span>
           <span class="panel-sub mono">{{ counts.busy_stations ?? 0 }}/{{ counts.stations ?? 0 }} 工位占用</span>
         </div>
-        <div class="panel-body">
+        <div class="panel-body chan-body">
           <div class="chans">
             <div v-for="ch in channels" :key="ch.name" class="chan" :class="ch.state">
               <div class="chan-top">
@@ -292,7 +262,7 @@ onBeforeUnmount(() => { if (timer) clearInterval(timer) })
                 </span>
               </div>
               <div class="chan-label">{{ ch.label }}</div>
-              <div v-if="Object.keys(ch.sources).length" class="sources tiny">
+              <div v-if="Object.keys(ch.sources).length" class="sources">
                 <span v-for="(level, name) in ch.sources" :key="name" class="src mono">
                   {{ name }}·P{{ level }}
                 </span>
@@ -312,20 +282,52 @@ onBeforeUnmount(() => { if (timer) clearInterval(timer) })
           </span>
         </div>
         <div class="panel-body tight">
-          <table class="table">
-            <tbody>
-              <tr v-for="item in keyTelemetry" :key="item.id">
-                <td class="muted">{{ item.label }}</td>
-                <td class="num bold">
+          <!-- 两列读数网格：8 项排成 4 行，与左侧「三通道」高度接近。
+               单列 8 行时右栏比左栏高出 130px，左栏下方就是一大片空白。 -->
+          <div class="readings">
+            <div v-for="item in keyTelemetry" :key="item.id" class="reading">
+              <span class="r-label">{{ item.label }}</span>
+              <span class="r-value">
+                <span class="num">
                   {{ fmt(item.v, { digits: item.id === 'gas_level' ? 3 : 1, fallback: '—' }) }}
-                  <span class="tiny muted">{{ item.unit }}</span>
-                </td>
-                <td class="num tiny muted" style="width: 70px">
-                  {{ item.ts ? fmtTime(item.ts) : '未采样' }}
-                </td>
-              </tr>
-            </tbody>
-          </table>
+                  <em v-if="item.unit">{{ item.unit }}</em>
+                </span>
+                <span class="r-time tiny muted">{{ item.ts ? fmtTime(item.ts) : '未采样' }}</span>
+              </span>
+            </div>
+          </div>
+        </div>
+      </section>
+    </div>
+
+    <div class="grid grid-2">
+      <!-- 出餐时长 -->
+      <section class="panel">
+        <div class="panel-head">
+          <span class="panel-title">出餐时长<span class="panel-sub"> · 派单到出餐，单位秒</span></span>
+        </div>
+        <div class="panel-body">
+          <ChartPanel
+            :option="cookOption" :height="180"
+            :is-empty="kpi?.cook_duration?.samples === 0"
+            empty="还没有完成出餐的订单——去订单页造一单并走完流程"
+            label="出餐时长：每单从派单到出餐的耗时，横轴为完成时间，纵轴为秒"
+          />
+        </div>
+      </section>
+
+      <!-- 消毒达标率 -->
+      <section class="panel">
+        <div class="panel-head">
+          <span class="panel-title">消毒达标率<span class="panel-sub"> · 已结束会话中达标占比</span></span>
+        </div>
+        <div class="panel-body">
+          <ChartPanel
+            :option="disinfectOption" :height="180"
+            :is-empty="kpi?.disinfection?.samples === 0"
+            empty="还没有已结束的消毒会话"
+            label="消毒达标率：已结束消毒会话中达到标准的占比，横轴为日期"
+          />
         </div>
       </section>
     </div>
@@ -360,59 +362,114 @@ onBeforeUnmount(() => { if (timer) clearInterval(timer) })
 </template>
 
 <style scoped>
-.guards { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+/* 保护状态条：整页最高优先级的信息。正常时低调成三条中性条，被触发时
+   整条翻成红底——「有没有事」这一眼不该需要读文字才能判断。 */
+.guards { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
 .guard {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 9px 12px;
+  gap: 10px;
+  padding: 12px 14px;
   border-radius: var(--radius);
-  border: 1px solid transparent;
+  border: 1px solid rgba(0, 0, 0, 0.05);
   background: var(--panel);
   box-shadow: var(--shadow);
-  color: var(--muted);
-  font-size: 12px;
+  color: var(--text-2);
+  font-size: var(--fs-sm);
+  font-weight: 500;
+  transition: background 160ms ease, border-color 160ms ease, color 160ms ease;
 }
+:root[data-theme="dark"] .guard { border-color: var(--line); }
 .guard .spacer { flex: 1; }
+/* 正常态图标压暗，避免三行绿勾抢走视觉重心 */
+.guard > svg { color: var(--ok); opacity: 0.55; flex: none; }
 .guard.on {
   border-color: var(--danger);
   background: var(--danger-soft);
-  color: var(--danger);
+  color: var(--danger-ink);
   font-weight: 600;
 }
+.guard.on > svg { color: var(--danger); opacity: 1; }
 
 .chans { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
-.chan {
-  border: 1px solid transparent;
-  border-radius: var(--radius-sm);
-  padding: 9px 11px;
-  background: var(--panel-2);
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-.chan.releasing { border-color: var(--warn); background: var(--warn-soft); }
-.chan.latched, .chan.manual_reset_required { border-color: var(--danger); background: var(--danger-soft); }
-.chan-top { display: flex; align-items: center; justify-content: space-between; }
-.chan-name { font-size: 11.5px; color: var(--text-2); }
-.chan-label { font-size: 12.5px; font-weight: 600; }
-.sources { display: flex; flex-wrap: wrap; gap: 4px; color: var(--danger); }
-.src { font-size: 10.5px; padding: 0 4px; border-radius: 3px; background: var(--danger-soft); }
-
-.events { list-style: none; margin: 0; padding: 4px 0; max-height: 340px; overflow: auto; }
-.event {
+/* 这一行两栏强行等高：左侧只有三张短卡片，右侧是 4 行读数表。
+   等高的收益是「面板底边对齐」，代价是左栏卡片内部要拉开分布——
+   卡片内用 space-between 把状态、名称、触发源分到上中下，看起来是排版，
+   而不是「一块面板下面空了一截」。 */
+.mid { align-items: stretch; }
+.mid > .panel { display: flex; flex-direction: column; }
+.mid > .panel > .chan-body { flex: 1; display: flex; }
+.mid .chans { flex: 1; align-items: stretch; }
+/* 读数网格：4 行 × 2 列。分割线用 border 画在单元格上，
+   不用表格是为了让「标签 / 数值 + 采样时刻」能在窄格子里两行排下。 */
+.readings { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.reading {
   display: flex;
   align-items: center;
-  gap: 9px;
-  padding: 6px 15px;
-  font-size: 12px;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px var(--sp-4);
   border-bottom: 1px solid var(--line);
+  border-right: 1px solid var(--line);
+  min-width: 0;
 }
+.reading:nth-child(2n) { border-right: none; }
+.reading:nth-last-child(-n + 2) { border-bottom: none; }
+.r-label {
+  font-size: var(--fs-xs);
+  color: var(--muted);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.r-value { display: flex; flex-direction: column; align-items: flex-end; gap: 1px; flex: none; }
+.r-value .num { font-size: var(--fs-base); font-weight: 600; letter-spacing: -0.01em; }
+.r-value em { font-style: normal; font-size: var(--fs-2xs); font-weight: 400; color: var(--muted); margin-left: 2px; }
+.r-time { font-size: var(--fs-2xs); opacity: 0.8; }
+.chan {
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  padding: 11px 13px;
+  background: var(--surface-2);
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 6px;
+  transition: border-color 160ms ease, background 160ms ease;
+}
+/* 状态只靠左色条 + 右上标签表达，不整块染色：三张卡片并排时，
+   整块淡橙/淡红在深色主题下会糊成一片土褐，反而看不出哪张是坏的。 */
+.chan.releasing { border-left-color: var(--warn); }
+.chan.latched, .chan.manual_reset_required { border-left-color: var(--danger); }
+.chan-top { display: flex; align-items: center; justify-content: space-between; gap: 6px; }
+.chan-name { font-size: var(--fs-xs); color: var(--muted); font-weight: 600; letter-spacing: 0.02em; }
+.chan-label { font-size: var(--fs-sm); font-weight: 600; line-height: 1.4; }
+.sources { display: flex; flex-wrap: wrap; gap: 4px; color: var(--danger-ink); }
+.src {
+  font-size: var(--fs-2xs);
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: var(--danger-soft);
+  font-weight: 500;
+}
+
+.events { list-style: none; margin: 0; padding: 4px 0; max-height: 320px; overflow: auto; }.event {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px var(--sp-4);
+  font-size: var(--fs-sm);
+  border-bottom: 1px solid var(--line);
+  transition: background 120ms ease;
+}
+.event:hover { background: var(--panel-2); }
 .event:last-child { border-bottom: none; }
-.event .time { width: 62px; flex: none; }
+.event .time { width: 66px; flex: none; font-variant-numeric: tabular-nums; }
 .event .text { color: var(--text-2); }
 
-@media (max-width: 1000px) {
+@media (max-width: 1100px) {
   .guards, .chans { grid-template-columns: minmax(0, 1fr); }
 }
 </style>
