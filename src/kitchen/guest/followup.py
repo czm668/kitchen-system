@@ -90,10 +90,26 @@ _SCRIPT_DEFAULT = {
 
 
 def is_low(score: Any) -> bool:
-    """score 是否为低分（1–2）。非整数一律不算低分，避免脏数据建任务。"""
-    try:
-        value = int(score)
-    except (TypeError, ValueError):
+    """score 是否为低分（1–2 的整数）。
+
+    只认 `int` 与"内容为整数"的 `str`。刻意排除两类坑：
+
+    * `bool` 是 `int` 子类，`int(True) == 1` 会把布尔值当低分；
+    * `float` 会被 `int()` 截断，`int(2.9) == 2` 会让 2.9 分误建回访任务。
+
+    真实链路里 `feedback()` 已把分数规范成 1–5 整数，这里严判是守住
+    `__all__` 公共规则的语义边界——脏数据一律不建任务。
+    """
+    if isinstance(score, bool):
+        return False
+    if isinstance(score, int):
+        value = score
+    elif isinstance(score, str):
+        try:
+            value = int(score.strip())
+        except (TypeError, ValueError):
+            return False
+    else:
         return False
     return 1 <= value <= LOW_SCORE_MAX
 
@@ -101,8 +117,10 @@ def is_low(score: Any) -> bool:
 def due_of(feedback_at: Any) -> str:
     """按评价时刻算当日截止（当天 23:59:59），返回 ISO 秒串。
 
-    评价时间可能是 ISO 字符串或 datetime；解析失败时退回传入原样字符串，
-    让调用方仍能存一个非空 due，而不是在回访链路上抛异常。
+    评价时间可能是 ISO 字符串或 datetime。**解析失败返回空串**：空串是
+    "无法计算截止"的显式信号，调用方据此不建任务并告警——绝不能把脏值
+    原样存成 due，否则 `is_overdue()` 解析不了它、任务永远不超时，
+    正是审查报告第一大根因"静默成功"的形态。
     """
     if isinstance(feedback_at, datetime):
         moment = feedback_at
@@ -110,7 +128,7 @@ def due_of(feedback_at: Any) -> str:
         try:
             moment = datetime.fromisoformat(str(feedback_at))
         except (TypeError, ValueError):
-            return str(feedback_at or "")
+            return ""
     # 保留 tzinfo：state.to_datetime() 返回带时区时间，若 here 丢时区，
     # 后续 is_overdue() 拿 naive due 与 aware now 比较会崩（真实路径也会踩）。
     deadline = moment.replace(
@@ -120,13 +138,17 @@ def due_of(feedback_at: Any) -> str:
 
 
 def is_overdue(due: str, now: datetime) -> bool:
-    """仍待回访且已过当日截止 → 超时。日期比较用可控时钟注入的 now。"""
+    """待回访任务已过当日截止 → 超时。日期比较用可控时钟注入的 now。
+
+    空 due（无需回访）不算超时。**非空但解析失败的历史脏 due 按超时处理**
+    （fail-closed）：宁可让人工看一眼，也不能让一条脏 due 的任务永远不超时。
+    """
     if not due:
         return False
     try:
         deadline = datetime.fromisoformat(due)
     except (TypeError, ValueError):
-        return False
+        return True
     return now > deadline
 
 

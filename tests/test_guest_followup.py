@@ -75,9 +75,29 @@ class TestRules:
         assert not followup.is_low(3) and not followup.is_low(5)
         assert not followup.is_low("x") and not followup.is_low(None)
 
+    def test_类型严判_boot浮点不误判为低分(self):
+        # S-1：bool 是 int 子类、float 会被 int() 截断，都不能算低分
+        assert not followup.is_low(True)
+        assert not followup.is_low(False)
+        assert not followup.is_low(1.9)
+        assert not followup.is_low(2.9)
+        # 整数字符串仍接受（公共规则的既有契约）
+        assert followup.is_low("2")
+
     def test_当日截止是当天235959(self):
         due = followup.due_of("2026-11-20T13:21:12+08:00")
         assert due == "2026-11-20T23:59:59+08:00"
+
+    def test_脏评价时刻返回空due不存脏值(self):
+        # S-3：解析失败返回空串，调用方据此不建无截止任务
+        assert followup.due_of("garbage") == ""
+        assert followup.due_of(None) == ""
+
+    def test_脏due按超时处理_failclosed(self):
+        # S-3：存量脏 due 解析不了时判超时，不能让任务永远不超时
+        assert followup.is_overdue(
+            "garbage", datetime(2026, 11, 21, 9, 0, tzinfo=CST)) is True
+        assert followup.is_overdue("", datetime(2026, 11, 21, 9, 0, tzinfo=CST)) is False
 
     def test_跨天算超时当天不算(self):
         due = followup.due_of("2026-11-20T13:21:12+08:00")
@@ -120,6 +140,21 @@ class TestCreateTask:
                        score=5)["complaint"]
         assert high["followup_state"] == ""
         assert high["followup_due"] == ""
+
+    def test_due算不出时不建无截止任务而发告警(self, server, monkeypatch):
+        # S-3：due_of 失败 → 不建 pending 任务（否则永远不超时），发告警事件
+        manager = login(server, "admin")
+        at = datetime(2026, 11, 20, 10, 0, tzinfo=CST)
+        monkeypatch.setattr(server.state, "to_datetime", lambda: at)
+        monkeypatch.setattr(followup, "due_of", lambda _m: "")
+        _s, rated = _closed_then_rated(server, manager, 2)
+        # 低分但没有 due，也就不建回访任务
+        assert rated["followup_state"] == ""
+        assert rated["followup_due"] == ""
+        assert rated["need_followup"] is False
+        # 告警事件与历史留痕都在，不是静默放过
+        assert any(h.get("action") == "followup_due_invalid" for h in rated["history"])
+        assert any(e.get("op") == "low_score_due_invalid" for e in server.state.events())
 
 
 # ---------------------------------------------------------------- 回访动作
@@ -225,6 +260,37 @@ class TestOverdueAndStats:
         assert done["followup_state"] == "done"
         assert any(h.get("action") == "followup_done" and h.get("late") is True
                    for h in done["history"])
+        # S-2：late 落到字段与视图，不再只躺在审计里
+        assert done["followup_late"] is True
+
+    def test_及时率区分当日完成与超时补做(self, server, monkeypatch):
+        # S-2：看板能区分"当日做"与"隔天补"，不再被 followup_rate 误导
+        manager = login(server, "admin")
+        at = datetime(2026, 11, 20, 10, 0, tzinfo=CST)
+        monkeypatch.setattr(server.state, "to_datetime", lambda: at)
+
+        # 第一单：当日完成（on time）
+        _s1, r1 = _closed_then_rated(server, manager, 2, key="g-fu-ontime")
+        data_of(server, "POST", f"/api/guest/complaints/{r1['id']}/followup",
+                session=manager, note="当日已联系",
+                expected_version=r1["version"])
+
+        # 第二单：隔天补做（late）
+        _s2, r2 = _closed_then_rated(server, manager, 2, key="g-fu-late")
+        nxt = datetime(2026, 11, 21, 9, 0, tzinfo=CST)
+        monkeypatch.setattr(server.state, "to_datetime", lambda: nxt)
+        done2 = data_of(server, "POST",
+                        f"/api/guest/complaints/{r2['id']}/followup",
+                        session=manager, note="隔天补回访",
+                        expected_version=r2["version"])["complaint"]
+        assert done2["followup_late"] is True
+
+        stats = data_of(server, "GET", "/api/guest/quality", session=manager)
+        assert stats["followup_total"] == 2
+        assert stats["followup_done"] == 2
+        assert stats["followup_rate"] == 1.0              # 完成率 100%
+        assert stats["followup_late_done"] == 1           # 其中 1 单是补做
+        assert stats["followup_on_time_rate"] == 0.5      # 及时率只有 50%
 
     def test_看板分母只含低分单(self, server, monkeypatch):
         manager = login(server, "admin")

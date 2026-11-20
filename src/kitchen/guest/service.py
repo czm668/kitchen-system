@@ -205,6 +205,9 @@ class Complaint:
     followup_by: str = ""
     followup_at: str = ""
     followup_note: str = ""
+    #: 超时后才完成的回访。S-2：late 此前只进 history/事件/审计，
+    #: 看板看不到「补做」的比例，故落库为字段供及时率口径统计。
+    followup_late: bool = False
     history: list[dict[str, Any]] = field(default_factory=list)
 
     @property
@@ -244,6 +247,7 @@ class Complaint:
             "followup_by": self.followup_by,
             "followup_at": self.followup_at,
             "followup_note": self.followup_note,
+            "followup_late": self.followup_late,
             "history": list(self.history),
         }
 
@@ -285,6 +289,8 @@ class Complaint:
             followup_by=str(row.get("followup_by") or ""),
             followup_at=str(row.get("followup_at") or ""),
             followup_note=str(row.get("followup_note") or ""),
+            # 兼容改造前落盘的工单：那时没有 late 字段
+            followup_late=bool(row.get("followup_late") or False),
             history=[dict(x) for x in row.get("history") or ()],
         )
 
@@ -1180,13 +1186,23 @@ class GuestService:
                      detail={"score": value})
         # 低分立刻建当日回访任务：发事件只解决"看到"，任务才解决"跟到"。
         # due 按评价当刻算（可控时钟），跨天由 quality_stats 判超时。
+        low = followup.is_low(value)
         created_task = False
-        if followup.is_low(value):
-            complaint.followup_state = "pending"
-            complaint.followup_due = followup.due_of(moment)
-            created_task = True
-            self._record(complaint, "followup_created", actor="system",
-                         detail={"score": value, "due": complaint.followup_due})
+        due_invalid = False
+        if low:
+            due = followup.due_of(moment)
+            if due:
+                complaint.followup_state = "pending"
+                complaint.followup_due = due
+                created_task = True
+                self._record(complaint, "followup_created", actor="system",
+                             detail={"score": value, "due": due})
+            else:
+                # due 算不出来：绝不建一个没有截止、永远不超时的任务。
+                # 明确告警让人工补录，堵住"静默成功"的盲区。
+                due_invalid = True
+                self._record(complaint, "followup_due_invalid", actor="system",
+                             detail={"score": value})
         self.save_complaint(complaint)
         if created_task:
             # 通知店长，不等日报——差评隔天才看到就晚了
@@ -1195,12 +1211,19 @@ class GuestService:
                 "guest_key": complaint.guest_key, "score": value,
                 "due": complaint.followup_due,
                 "message": (f"工单 {complaint.complaint_no} 顾客评分 {value} 分，"
-                            f"请店长当天 {complaint.followup_due[11:19] if complaint.followup_due else '24:00'} 前回访")})
+                            f"请店长当天 {complaint.followup_due[11:19]} 前回访")})
+        elif due_invalid:
+            # 评分是低分但 due 无效：发告警而不是悄悄放过
+            self.state.emit("complaint", {
+                "op": "low_score_due_invalid", "complaint_no": complaint.complaint_no,
+                "guest_key": complaint.guest_key, "score": value,
+                "message": (f"工单 {complaint.complaint_no} 顾客评分 {value} 分，"
+                            f"回访截止时间计算失败，请人工核实并补录")})
         self.state.audit.record(
             actor="customer", role="customer", action="guest.feedback",
             target=complaint.complaint_no,
             after={"score": value, "comment": complaint.feedback_comment,
-                   "followup_created": created_task})
+                   "followup_created": created_task, "followup_due_invalid": due_invalid})
         return self._view(complaint)
 
     def followup(self, complaint_id: int, *, actor: str, role: str,
@@ -1226,6 +1249,7 @@ class GuestService:
         complaint.followup_by = str(actor or "unknown")
         complaint.followup_at = moment.isoformat(timespec="seconds")
         complaint.followup_note = text[:followup.NOTE_MAX]
+        complaint.followup_late = late
         complaint.version += 1
         complaint.updated_at = moment
         self._record(complaint, "followup_done", actor=str(actor or "unknown"),
@@ -1259,6 +1283,7 @@ class GuestService:
         # 回访闭环：只统计建过任务的低分单（有 followup_due），高分单不进分母
         now = self.state.to_datetime()
         followup_total = followup_done = followup_pending = followup_overdue = 0
+        followup_late_done = 0
 
         for c in rows:
             esc = ((c.ai_suggestion or {}).get("handling") or {}).get("escalation") or {}
@@ -1272,6 +1297,8 @@ class GuestService:
                 followup_total += 1
                 if c.followup_state == "done":
                     followup_done += 1
+                    if c.followup_late:
+                        followup_late_done += 1
                 else:
                     followup_pending += 1
                     if followup.is_overdue(c.followup_due, now):
@@ -1336,8 +1363,15 @@ class GuestService:
             "followup_pending": followup_pending,
             "followup_overdue": followup_overdue,
             "followup_rate": round(followup_done / followup_total, 3) if followup_total else 0.0,
+            # S-2：及时率 = 当日完成 / 已完成。late 单计入 followup_done 分子，
+            # 但这里单独暴露"补做"数量与及时率，管理者不再被 done 数字误导。
+            "followup_late_done": followup_late_done,
+            "followup_on_time_rate": (
+                round((followup_done - followup_late_done) / followup_done, 3)
+                if followup_done else 0.0),
             "note": ("首响取第一条人工动作时间，AI 自动答复不计；"
-                     "解决时长只统计已结案工单；回访只统计低分单"),
+                     "解决时长只统计已结案工单；回访只统计低分单；"
+                     "回访及时率=当日完成/已完成，超时补做单独可数"),
         }
 
     # ------------------------------------------------------------ 视图
@@ -1410,6 +1444,8 @@ class GuestService:
         row["followup_overdue"] = bool(
             complaint.followup_state == "pending"
             and followup.is_overdue(complaint.followup_due, self.state.to_datetime()))
+        row["followup_late"] = bool(
+            complaint.followup_state == "done" and complaint.followup_late)
         if complaint.followup_due:
             row["followup_script"] = followup.script_for(
                 complaint.category, variant="A", no=complaint.complaint_no)

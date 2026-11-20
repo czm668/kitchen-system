@@ -36,7 +36,9 @@ const rejectCode = ref('evidence_missing')
 const showReject = ref(false)
 const followupNote = ref('')
 const profile = ref(null)
-const quality = ref({ csat: 0, first_response_min: 0, feedback_count: 0, reject_rate: 0 })
+const quality = ref({ csat: 0, first_response_min: 0, feedback_count: 0, reject_rate: 0,
+  followup_total: 0, followup_done: 0, followup_pending: 0, followup_overdue: 0,
+  followup_late_done: 0, followup_on_time_rate: 0 })
 // 质检评分卡：自动分只覆盖可取证的 70 分，服务态度 30 分必须人工补评
 const qa = ref({ count: 0, avg: 0, pass_rate: 0, excellent_rate: 0, coverage: 0.7, grades: {}, top_deductions: [], by_actor: {} })
 const qaGradeClass = { '优秀': 'ok', '良好': 'ok', '合格': 'info', '待改进': 'warn', '不合格': 'danger' }
@@ -246,7 +248,11 @@ onMounted(load)
         <template v-if="quality.followup_overdue"> · 超时 {{ quality.followup_overdue }}</template>
       </span>
       <span v-if="quality.followup_total" class="tiny muted">
-        当日回访 {{ quality.followup_done }}/{{ quality.followup_total }}
+        回访 {{ quality.followup_done }}/{{ quality.followup_total }}
+        <template v-if="quality.followup_done">
+          · 及时率 {{ Math.round(quality.followup_on_time_rate * 100) }}%
+          <template v-if="quality.followup_late_done">（超时补做 {{ quality.followup_late_done }}）</template>
+        </template>
       </span>
       <span v-if="qa.count" class="tag" :class="qa.avg >= 90 ? 'ok' : qa.avg >= 70 ? 'info' : 'warn'">
         质检 {{ qa.avg }} 分 · 合格 {{ Math.round(qa.pass_rate * 100) }}%
@@ -424,10 +430,12 @@ onMounted(load)
           <div v-if="selected.followup_due" class="ai-card" style="margin-top: 12px">
             <div class="row between">
               <span class="label">低分当日回访 · {{ selected.feedback_score }} 分</span>
-              <span class="tag" :class="selected.followup_state === 'done' ? 'ok'
-                    : (selected.followup_overdue ? 'danger' : 'warn')">
-                {{ selected.followup_state === 'done' ? '已完成'
-                   : (selected.followup_overdue ? '已超时' : '待回访') }}
+              <span class="tag" :class="selected.followup_late ? 'warn'
+                    : (selected.followup_state === 'done' ? 'ok'
+                    : (selected.followup_overdue ? 'danger' : 'warn'))">
+                {{ selected.followup_late ? '超时补做'
+                   : (selected.followup_state === 'done' ? '已完成'
+                   : (selected.followup_overdue ? '已超时' : '待回访')) }}
               </span>
             </div>
             <div class="tiny muted" style="margin-top:6px">
