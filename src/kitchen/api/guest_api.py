@@ -220,6 +220,18 @@ def guest_reject(state, session, params, data) -> dict[str, Any]:
     return {"complaint": payload}
 
 
+def guest_followup(state, session, params, data) -> dict[str, Any]:
+    """低分单当日回访：记联系情况并关闭任务。审计由 service 统一落。"""
+    payload = state.guest.followup(
+        _int(params.get("complaint_id"), "complaint_id"),
+        actor=session.subject if session else "unknown",
+        role=session.role if session else "",
+        note=str(data.get("note") or ""),
+        expected_version=data.get("expected_version"),
+    )
+    return {"complaint": payload}
+
+
 def guest_portrait_refresh(state, session, params, data) -> dict[str, Any]:
     key = str(params.get("guest_key") or data.get("guest_key") or "").strip()
     return state.guest.profile_view(key, refresh=True)
@@ -230,6 +242,7 @@ GUEST_ACTIONS: dict[str, Callable] = {
     "approve": guest_approve,
     "resolve": guest_resolve,
     "reject": guest_reject,
+    "followup": guest_followup,
     "portrait": guest_portrait_refresh,
 }
 
@@ -285,5 +298,7 @@ def register_guest_routes(router) -> None:
                _act("resolve"), permission="guest.resolve")
     router.add("POST", "/api/guest/complaints/{complaint_id}/reject",
                _act("reject"), permission="guest.review")
+    router.add("POST", "/api/guest/complaints/{complaint_id}/followup",
+               _act("followup"), permission="guest.followup")
     router.add("POST", "/api/guest/profiles/{guest_key}/portrait",
                _act("portrait"), permission="guest.review")

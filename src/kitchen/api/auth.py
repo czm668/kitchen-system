@@ -76,6 +76,9 @@ _PERMISSIONS: dict[str, frozenset[str]] = {
     "guest.review": frozenset({"lead", "manager"}),
     "guest.approve": frozenset({"manager"}),
     "guest.resolve": frozenset({"manager"}),
+    # 低分单当日回访：由店长/经理执行（事件文案即"请店长当天回访"），
+    # 组长不给——回访要能对顾客给结论，权限对齐终审档。
+    "guest.followup": frozenset({"manager"}),
     # A12 经营账：毛利/净利/成本是店内经营数据，只给店长（manager）。
     # 组长、操作员、观察员一律 403——比阈值配置更敏感，宁可收窄。
     "finance.read": frozenset({"manager"}),

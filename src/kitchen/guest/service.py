@@ -53,7 +53,7 @@ from kitchen.domain import (
 from kitchen.process.journal import append_journal
 
 from .handler import analyze, compose_reply, urgent_actions
-from . import compensation, guard, handoff, quality
+from . import compensation, followup, guard, handoff, quality
 from .llm import (
     COMPENSATIONS, COMPENSATION_LABELS, TAGS, LLMProvider, RuleProvider,
     llm_run_row, run_guarded, sanitize_user_text,
@@ -198,6 +198,13 @@ class Complaint:
     feedback_score: int = 0
     feedback_comment: str = ""
     feedback_at: str = ""
+    #: 低分当日回访闭环：1–2 分自动建 pending 任务，店长/经理记 who/when/note 后 done。
+    #: 空串表示无需回访（高分或未评），`pending`/`done` 见 followup.FOLLOWUP_STATES。
+    followup_state: str = ""
+    followup_due: str = ""          # 当日 23:59:59 截止（ISO 秒串）
+    followup_by: str = ""
+    followup_at: str = ""
+    followup_note: str = ""
     history: list[dict[str, Any]] = field(default_factory=list)
 
     @property
@@ -232,6 +239,11 @@ class Complaint:
             "feedback_score": self.feedback_score,
             "feedback_comment": self.feedback_comment,
             "feedback_at": self.feedback_at,
+            "followup_state": self.followup_state,
+            "followup_due": self.followup_due,
+            "followup_by": self.followup_by,
+            "followup_at": self.followup_at,
+            "followup_note": self.followup_note,
             "history": list(self.history),
         }
 
@@ -267,6 +279,12 @@ class Complaint:
             feedback_score=int(row.get("feedback_score") or 0),
             feedback_comment=str(row.get("feedback_comment") or ""),
             feedback_at=str(row.get("feedback_at") or ""),
+            # 兼容改造前落盘的工单：那时没有回访字段，旧低分单不当成欠回访
+            followup_state=str(row.get("followup_state") or ""),
+            followup_due=str(row.get("followup_due") or ""),
+            followup_by=str(row.get("followup_by") or ""),
+            followup_at=str(row.get("followup_at") or ""),
+            followup_note=str(row.get("followup_note") or ""),
             history=[dict(x) for x in row.get("history") or ()],
         )
 
@@ -1160,18 +1178,70 @@ class GuestService:
         complaint.updated_at = moment
         self._record(complaint, "feedback", actor="customer",
                      detail={"score": value})
+        # 低分立刻建当日回访任务：发事件只解决"看到"，任务才解决"跟到"。
+        # due 按评价当刻算（可控时钟），跨天由 quality_stats 判超时。
+        created_task = False
+        if followup.is_low(value):
+            complaint.followup_state = "pending"
+            complaint.followup_due = followup.due_of(moment)
+            created_task = True
+            self._record(complaint, "followup_created", actor="system",
+                         detail={"score": value, "due": complaint.followup_due})
         self.save_complaint(complaint)
-        # 低分立刻通知店长，不等日报——差评隔天才看到就晚了
-        if value <= 2:
+        if created_task:
+            # 通知店长，不等日报——差评隔天才看到就晚了
             self.state.emit("complaint", {
                 "op": "low_score", "complaint_no": complaint.complaint_no,
                 "guest_key": complaint.guest_key, "score": value,
+                "due": complaint.followup_due,
                 "message": (f"工单 {complaint.complaint_no} 顾客评分 {value} 分，"
-                            f"请店长当天回访")})
+                            f"请店长当天 {complaint.followup_due[11:19] if complaint.followup_due else '24:00'} 前回访")})
         self.state.audit.record(
             actor="customer", role="customer", action="guest.feedback",
             target=complaint.complaint_no,
-            after={"score": value, "comment": complaint.feedback_comment})
+            after={"score": value, "comment": complaint.feedback_comment,
+                   "followup_created": created_task})
+        return self._view(complaint)
+
+    def followup(self, complaint_id: int, *, actor: str, role: str,
+                 note: str, expected_version: int | None = None) -> dict[str, Any]:
+        """店长/经理执行低分单当日回访，记 who/when/note 后关闭任务。
+
+        **回访不改评分、不改工单状态**：评分是顾客给的事实，回访是补救动作，
+        不能回头把 1 分"洗白"，也不把已结案工单重开（要重开走补证）。
+        超过当日截止仍允许回访并如实标 `late=true`——补做比不做强，
+        但超时事实进审计，不能抹掉。
+        """
+        complaint = self.complaint(complaint_id)
+        self._guard_version(complaint, expected_version)
+        if complaint.followup_state != "pending":
+            raise InvalidTransition(
+                f"工单 {complaint.complaint_no} 没有待回访任务或已完成，不能重复回访")
+        text = str(note or "").strip()
+        if not text:
+            raise GuestError("回访必须填写联系情况说明")
+        moment = self.state.to_datetime()
+        late = followup.is_overdue(complaint.followup_due, moment)
+        complaint.followup_state = "done"
+        complaint.followup_by = str(actor or "unknown")
+        complaint.followup_at = moment.isoformat(timespec="seconds")
+        complaint.followup_note = text[:followup.NOTE_MAX]
+        complaint.version += 1
+        complaint.updated_at = moment
+        self._record(complaint, "followup_done", actor=str(actor or "unknown"),
+                     detail={"note": complaint.followup_note, "late": late})
+        self.save_complaint(complaint)
+        self.state.emit("complaint", {
+            "op": "followup_done", "complaint_no": complaint.complaint_no,
+            "guest_key": complaint.guest_key, "by": complaint.followup_by,
+            "late": late,
+            "message": (f"工单 {complaint.complaint_no} 已完成"
+                        f"{'超时' if late else '当日'}回访")})
+        self.state.audit.record(
+            actor=str(actor or "unknown"), role=role, action="guest.followup",
+            target=complaint.complaint_no,
+            after={"score": complaint.feedback_score, "late": late,
+                   "due": complaint.followup_due, "note": complaint.followup_note})
         return self._view(complaint)
 
     def quality_stats(self, *, limit: int = 20) -> dict[str, Any]:
@@ -1186,6 +1256,9 @@ class GuestService:
         scores: list[int] = []
         terminal = rejected = 0
         l3 = 0
+        # 回访闭环：只统计建过任务的低分单（有 followup_due），高分单不进分母
+        now = self.state.to_datetime()
+        followup_total = followup_done = followup_pending = followup_overdue = 0
 
         for c in rows:
             esc = ((c.ai_suggestion or {}).get("handling") or {}).get("escalation") or {}
@@ -1195,6 +1268,14 @@ class GuestService:
                 rejected += 1
             if c.feedback_score:
                 scores.append(int(c.feedback_score))
+            if c.followup_due:
+                followup_total += 1
+                if c.followup_state == "done":
+                    followup_done += 1
+                else:
+                    followup_pending += 1
+                    if followup.is_overdue(c.followup_due, now):
+                        followup_overdue += 1
             if not c.terminal:
                 continue
             terminal += 1
@@ -1249,8 +1330,14 @@ class GuestService:
             "feedback_count": len(scores),
             "feedback_rate": round(len(scores) / terminal, 3) if terminal else 0.0,
             "low_scores": low[:max(1, int(limit))],
+            # 回访闭环：分母是建过任务的低分单，不含高分/未评工单
+            "followup_total": followup_total,
+            "followup_done": followup_done,
+            "followup_pending": followup_pending,
+            "followup_overdue": followup_overdue,
+            "followup_rate": round(followup_done / followup_total, 3) if followup_total else 0.0,
             "note": ("首响取第一条人工动作时间，AI 自动答复不计；"
-                     "解决时长只统计已结案工单"),
+                     "解决时长只统计已结案工单；回访只统计低分单"),
         }
 
     # ------------------------------------------------------------ 视图
@@ -1317,6 +1404,15 @@ class GuestService:
         row["need_feedback"] = (
             complaint.state in (ComplaintState.APPROVED, ComplaintState.AUTO_CLOSED)
             and complaint.feedback_score == 0)
+
+        # ---- 低分当日回访：管理端据此显示待办/超时与回访话术 ----
+        row["need_followup"] = complaint.followup_state == "pending"
+        row["followup_overdue"] = bool(
+            complaint.followup_state == "pending"
+            and followup.is_overdue(complaint.followup_due, self.state.to_datetime()))
+        if complaint.followup_due:
+            row["followup_script"] = followup.script_for(
+                complaint.category, variant="A", no=complaint.complaint_no)
 
         # ---- 质检评分卡：只读，基于本视图已算好的字段，不回写工单 ----
         row["qa"] = quality.score_complaint(row)
