@@ -29,7 +29,7 @@ from __future__ import annotations
 from typing import Any, Mapping
 
 from . import guard, store
-from .intent import classify_intent, intent_result
+from .intent import ORDER_DISH_VERBS, classify_intent, intent_result
 
 __all__ = ["ChatService"]
 
@@ -65,8 +65,10 @@ class ChatService:
             return intent_result("other", reply="请说点什么，我来帮您看看。")
 
         # 有明确补偿勾选/订单上下文时，强制按投诉意图走（别把「要退款谢谢」分流成闲聊）
+        # 菜名由本层从菜品表取（规则层不碰仓储）：否则「青椒肉丝」掉进兜底被判成客诉。
         intent = classify_intent(
-            raw, has_order=bool(order_id), force_complaint=bool(wants_refund))
+            raw, has_order=bool(order_id), force_complaint=bool(wants_refund),
+            dish_names=self._dish_names())
 
         handler = {
             "urge": self._urge,
@@ -202,6 +204,9 @@ class ChatService:
         任何一条都不承诺折扣、热量、销量——系统里没有这些数据。
         """
         sub = str(intent.get("sub") or "list")
+        if sub == "order_dish":
+            return self._menu_order_dish(
+                text=str(text), intent=intent, token=token, owner=owner)
         handler = {
             "price": self._menu_price,
             "store_info": self._menu_store_info,
@@ -226,6 +231,15 @@ class ChatService:
             return [r for r in rows if r.get("enabled")]
         return [r for r in rows if r.get("enabled") and not r.get("sold_out")]
 
+    def _dish_names(self) -> tuple[str, ...]:
+        """在售菜名，供意图层识别「顾客说的是一道菜」。
+        读菜品表失败就返回空元组——点单识别降级，但其他意图分流不受影响。
+        """
+        try:
+            return tuple(str(r["name"]) for r in self._dishes() if r.get("name"))
+        except Exception:  # noqa: BLE001
+            return ()
+
     def _match_dish(self, text: str) -> dict[str, Any] | None:
         """从顾客原话里认出菜名。取最长命中，避免「肉丝」抢了「青椒肉丝」。"""
         rows = self._dishes(include_sold_out=True)
@@ -244,7 +258,8 @@ class ChatService:
                 lead, sub = "目前在售", "list"
             if picks:
                 lines = [f"{r['name']} ¥{_money(r['price'])}" for r in picks]
-                reply = f"{lead}：" + "、".join(lines) + "。想点哪道直接说，或到点菜页下单。"
+                reply = (f"{lead}：" + "、".join(lines)
+                         + "。想点哪道回我菜名，我帮您下单；或到点菜页选。")
             else:
                 reply = "菜单暂时没准备好，请稍后再问我。"
             return intent_result("menu_query", sub=sub,
@@ -256,6 +271,53 @@ class ChatService:
                                  confidence=intent["confidence"],
                                  reply="我这就帮您看菜单，请稍等；也可直接在点菜页浏览。",
                                  action="menu", data={"note": str(exc)[:80]})
+
+    def _menu_order_dish(self, *, text: str, intent: Mapping[str, Any],
+                         token: str, owner: Mapping[str, Any]) -> dict[str, Any]:
+        """顾客提到在售菜名：只说菜名给报价与确认路径，明确说「点」才真下单。
+
+        为什么分两步：菜名本身只是「提到这道菜」，后厨收到订单就会开做，
+        擅自下单是不可逆动作。所以裸菜名只报价 + 给出可复制的确认说法；
+        顾客带了「点一份 / 来一道 / 我要」这类购买动词，才调用顾客通道下单。
+        复用 `customer.place()`——价格快照、配方版本、沽清整单拒绝全走原链路，
+        本层零业务逻辑。
+        """
+        dish = self._match_dish(text)
+        if dish is None:
+            return intent_result(
+                "menu_query", sub="order_dish", confidence=intent["confidence"],
+                reply="您说个菜名，我帮您看价格和下单；也可以直接到点菜页选。",
+                action="menu")
+        name = str(dish.get("name") or "")
+        code = str(dish.get("code") or "")
+        price = _money(dish.get("price"))
+        wants = any(v in text for v in ORDER_DISH_VERBS)
+        if not wants:
+            return intent_result(
+                "menu_query", sub="order_dish", confidence=intent["confidence"],
+                reply=(f"{name}¥{price}。想点这道，回我「点{name}」我帮您下单，"
+                       "或到点菜页选。"),
+                action="menu", data={"code": code, "price": dish.get("price"),
+                                     "confirmed": False})
+
+        try:
+            res = self.gs.state.customer.place(
+                token, [{"code": code, "qty": 1}], owner.get("table_id"))
+            reply = (f"已帮您下单：{name} ×1，订单号 {res['order_no']}。"
+                     f"厨房已收到，在「订单」页能看到进度；要加量或改动随时告诉我。")
+            return intent_result(
+                "menu_query", sub="order_dish", confidence=intent["confidence"],
+                reply=reply, action="order",
+                data={"code": code, "order_id": res["order_id"],
+                      "order_no": res["order_no"], "confirmed": True})
+        except Exception as exc:  # noqa: BLE001 - 沽清/批次/归属都给人话，不建工单
+            msg = str(exc)
+            reply = (f"{name}这会儿下单没成功：{msg[:60]}。"
+                     "您可以到点菜页看看当天的在售情况，或告诉我换一道。")
+            return intent_result(
+                "menu_query", sub="order_dish", confidence=intent["confidence"],
+                reply=reply, action="none",
+                data={"code": code, "note": msg[:80], "confirmed": False})
 
     def _menu_price(self, *, text: str, intent: Mapping[str, Any]) -> dict[str, Any]:
         """问「这道菜多少钱」：按菜名精确报单价，不再答「最便宜的 4 道」。"""
@@ -275,7 +337,9 @@ class ChatService:
                      and r.get("code") != dish.get("code")]
             if peers:
                 reply += f"。同品类的还有{peers[0]['name']}¥{_money(peers[0]['price'])}"
-            reply += "。要帮您下单吗？"
+            # 不要问「要帮您下单吗」——顾客回一个「要」会掉进兜底被判成客诉。
+            # 给一句可复制的明确指令，顾客照着说就能命中点单意图。
+            reply += f"。想点回我「点{dish['name']}」，我帮您下单。"
             return intent_result("menu_query", sub="price",
                                  confidence=intent["confidence"], reply=reply,
                                  action="menu",
@@ -399,7 +463,7 @@ class ChatService:
     # ------------------------------------------------------------ 闲聊
     def _chitchat(self, *, token, guest_key, text, order_id, item_id,
                   wants_refund, intent, owner) -> dict[str, Any]:
-        reply = ("不客气，有事随时找我～我可以帮您催菜、查订单、看菜单，"
+        reply = ("不客气，有事随时找我～我可以帮您点单、催菜、查订单、看菜单，"
                  "有问题也能直接说，我来帮您处理。")
         return intent_result("chitchat", confidence=intent["confidence"],
                              reply=reply, action="none")

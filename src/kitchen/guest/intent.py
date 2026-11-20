@@ -34,7 +34,7 @@ from __future__ import annotations
 
 from typing import Any, Mapping
 
-__all__ = ["INTENTS", "SUBS", "classify_intent", "intent_result"]
+__all__ = ["INTENTS", "SUBS", "ORDER_DISH_VERBS", "classify_intent", "intent_result"]
 
 INTENTS = ("complaint", "urge", "order_query", "menu_query", "chitchat", "other")
 
@@ -43,7 +43,7 @@ SUBS = (
     # menu_query
     "list", "recommend", "price", "taste", "allergy", "eta", "soldout",
     "portion", "combo", "nutrition", "store_info", "takeaway", "howto",
-    "payment",
+    "payment", "order_dish",
     # order_query
     "status", "add", "cancel", "missing", "wrong", "table_change", "lost",
     "queue",
@@ -134,6 +134,15 @@ _ORDER_SUBS: tuple[tuple[str, tuple[str, ...]], ...] = (
 _URGE_ESCALATE = ("催了两次", "催了好几次", "催了没用", "催了也没", "还是没",
                   "一直没上", "还没上", "还没来", "催过")
 
+#: 明确「我要点这道」的说法。光一个菜名（"青椒肉丝"）只是提了一道菜，
+#: 不能擅自下单（后厨会立刻看到并开做）；带上这些动词才是购买指令。
+#: 注意「点」单字范围大，所以只在**同时命中菜名**时才生效（见 classify_intent）。
+ORDER_DISH_VERBS = (
+    "点一份", "点一个", "点两", "点三", "点道", "点个", "点",
+    "来一份", "来一个", "来两", "来道", "来个", "来一份",
+    "我要", "要一份", "要一个", "下单", "订一份", "订个",
+)
+
 
 def _first_sub(text: str, table: tuple[tuple[str, tuple[str, ...]], ...],
                default: str) -> str:
@@ -145,11 +154,17 @@ def _first_sub(text: str, table: tuple[tuple[str, tuple[str, ...]], ...],
 
 
 def classify_intent(text: Any, *, has_order: bool = False,
-                    force_complaint: bool = False) -> dict[str, Any]:
+                    force_complaint: bool = False,
+                    dish_names: tuple[str, ...] = ()) -> dict[str, Any]:
     """规则意图识别。返回 `{intent, sub, confidence, signals}`。
 
     `force_complaint` 用于「顾客明确勾选了要补偿/上传了证据」等场景——
     这些动作本身就是投诉意图，直接跳过分流。
+
+    `dish_names` 是在售菜名（由 `chat` 层从菜品表取，规则层不碰仓储）。
+    顾客只说一个菜名时旧逻辑会掉进兜底：有订单判 complaint、无订单判 other，
+    而 `chat` 的 other 也走建工单分支——「青椒肉丝」就这样变成客诉。
+    传入菜名后，命中菜名且在售，归 `menu_query/order_dish`，不再建工单。
     """
     raw = str(text or "").strip()
     low = raw.lower()
@@ -184,6 +199,25 @@ def classify_intent(text: Any, *, has_order: bool = False,
         # 靠 sub 区分具体答什么，避免「问地址」被答成菜单列表。
         return {"intent": "menu_query", "sub": menu_sub or "list",
                 "confidence": 0.85, "signals": (menu_q or store_q)[:3]}
+
+    # 2.6) 在售菜名 → 点单子意图。放在菜单子意图**之后**，
+    #      否则「水煮鱼多少钱」的 price、「推荐个不辣的」的 recommend 会被菜名抢走。
+    #      强投诉已在第 1 步返回，所以「青椒肉丝里有头发」不会被这里接走。
+    #      带点单动词（点/来一份/我要…）才置 wants=True，chat 层据此决定是否真下单。
+    if dish_names:
+        hit = max((str(n) for n in dish_names if str(n) and str(n) in raw),
+                  key=len, default="")
+        if hit:
+            wants = any(v in raw for v in ORDER_DISH_VERBS)
+            return {"intent": "menu_query", "sub": "order_dish",
+                    "confidence": 0.92 if wants else 0.82,
+                    "signals": [hit, "order_intent" if wants else "dish_mention"]}
+
+    # 2.7) 明确说要下单、但还没提菜名 → 也归点单，由 chat 引导说菜名。
+    #      「我要下单 / 点菜」不含疑问词，不会命中 howto，旧逻辑直接掉兜底变客诉。
+    if any(v in raw for v in ("我要下单", "下单吧", "点菜")):
+        return {"intent": "menu_query", "sub": "order_dish",
+                "confidence": 0.8, "signals": ["order_intent_no_dish"]}
 
     # 3) 中等投诉信号 + 不满语气 → 投诉
     mid = [w for w in _COMPLAINT_MID if w in raw]
