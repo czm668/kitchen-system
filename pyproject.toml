@@ -12,6 +12,9 @@ kitchen = "kitchen.api.server:main"
 
 [project.optional-dependencies]
 test = ["pytest>=7.0"]
+# 开发工具（不装也能跑、不影响交付）：ruff 只做"语法级"检查，
+# 见 [tool.ruff]；没装时 tools/ci.py 会明示跳过，不伪造 PASS。
+dev = ["pytest>=7.0", "ruff>=0.6"]
 # A2 MQTT 真链路：不装也能跑（Inproc 进程内通道覆盖全部代码路径），
 # 演示真 broker 用 `--amqtt`（内嵌）或 `--broker host:port`（EMQX 等）
 mqtt = ["paho-mqtt>=2.0", "amqtt>=0.11"]
@@ -26,3 +29,23 @@ mysql = ["pymysql>=1.1,<2", "cryptography>=42"]
 pythonpath = ["src", "."]
 testpaths = ["tests"]
 addopts = "--capture=sys -q"
+
+[tool.ruff]
+# 只开「语法级」三条：E9 语法错误、F63 % 格式化串非法、F7 语句层语法错。
+# 为什么刻意不扩大：
+#   · 业务级规则（BLE001 宽异常、ARG 未用参数、B bugbear）会引来大量存量噪音，
+#     而本项目对"宽异常"的要求比 ruff 更严——`tools/review_lint.py` 要求写理由，
+#     ruff 只要求有 noqa。两条并存会互相打脸，所以分工：语法级给 ruff，业务级给 review_lint。
+#   · F82（未定义名）需要跨分支符号解析，本项目有 KITCHEN_DB_URL 条件导入 pymysql，
+#     误报风险不为零，等真跑过一轮再评估。
+# 本地未装 ruff 时 ci.py 会跳过本关（打印 SKIP），不会伪造通过。
+target-version = "py311"
+# 只扫自己的代码：vendor / Ultralytics 是第三方素材，datasets / runs / var 是产物，
+# web / miniapp 不是 Python。扫进去只会制造噪音。
+extend-exclude = [
+    "vendor", "Ultralytics", ".local", "datasets", "runs", "var", "backups",
+    "web", "miniapp", "deploy", "migrations", "firmware", "scenarios", "fixtures",
+]
+
+[tool.ruff.lint]
+select = ["E9", "F63", "F7"]

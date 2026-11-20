@@ -10,12 +10,19 @@ Python 版本与依赖安装）。
 
 ## 关卡
 
-1. `tools/rule_lint.py`（R5 时钟守卫：api/ 无 state.now/wall 旧名、epoch 不传 now= 参数）
-2. `tools/consistency_check.py`（README 规模数字守卫，慢关卡之前先跑）
-3. pytest 全量单测（约 3 分钟）
-4. `tools/migrate.py check`（51 表迁移校验，SQLite 真跑两遍）
-5. `tools/web_check.py`（管理端静态检查 + 构建 + HTTP 冒烟）
-6. `tools/miniapp_check.py`（小程序自检，含 AppID / 配置断言）
+0. `tools/review_lint.py`（审查守卫 RL001/RL002：宽异常吞掉必须写理由、AI 输出不得有
+   approve/decision/amount 键。纯静态、约 1 秒，最先跑；口径见
+   `docs/15_代码审查标准与流程.md` §5.1 / §5.4）
+1. `ruff check`（语法级 E9/F63/F7，配置在 pyproject.toml。**本机没装 ruff 时打印 SKIP**，
+   不算通过也不算失败；GitHub Actions 会 `pip install ruff` 让它真跑）
+2. `tools/rule_lint.py`（R5 时钟守卫：api/ 无 state.now/wall 旧名、epoch 不传 now= 参数）
+3. `tools/consistency_check.py`（README 规模数字守卫，慢关卡之前先跑）
+4. pytest 全量单测（约 3 分钟）
+5. `tools/migrate.py check`（51 表迁移校验，SQLite 真跑两遍）
+6. `tools/web_check.py`（管理端静态检查 + 构建 + HTTP 冒烟）
+7. `tools/miniapp_check.py`（小程序自检，含 AppID / 配置断言）
+8. `tools/pr_size.py`（PR 体积提示：>400 行 / >10 文件 / >2 域 时提醒，**恒不阻断**；
+   默认含未提交工作区，只看已提交加 `--committed-only`）
 
 用法：
     python tools/ci.py                 # 全部关卡，失败即停
@@ -28,6 +35,7 @@ Python 版本与依赖安装）。
 from __future__ import annotations
 
 import argparse
+import shutil
 import subprocess
 import sys
 import time
@@ -36,14 +44,30 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 
 #: 关卡清单：(名称, argv, 是否允许跳过)。argv 在 ROOT 下执行。
+#: 名称以 `ruff` 开头的那关在装了 ruff 时真跑、没装时明示跳过（不伪造 PASS）。
 STAGES: list[tuple[str, list[str], bool]] = [
+    ("审查静态守卫", [sys.executable, "tools/review_lint.py"], False),
+    ("ruff 语法守卫", [], True),
     ("R5 时钟守卫", [sys.executable, "tools/rule_lint.py"], False),
     ("文档数字守卫", [sys.executable, "tools/consistency_check.py"], False),
     ("pytest 全量单测", [sys.executable, "-m", "pytest", "-o", "addopts=", "-q", "tests/"], False),
     ("迁移校验", [sys.executable, "tools/migrate.py", "check"], False),
     ("管理端 web_check", [sys.executable, "tools/web_check.py"], False),
     ("小程序 miniapp_check", [sys.executable, "tools/miniapp_check.py"], False),
+    ("PR 体积提示", [sys.executable, "tools/pr_size.py"], True),
 ]
+
+
+def _ruff_argv() -> list[str] | None:
+    """装了 ruff 才返回 argv；没装返回 None（由调用方打印 SKIP）。
+
+    ruff 是 Rust 二进制，`python -m ruff` 不成立，必须走 PATH 里的可执行文件。
+    """
+    exe = shutil.which("ruff")
+    if not exe:
+        return None
+    return [exe, "check", "--no-cache", "src", "tests", "tools"]
+
 
 
 def _run(name: str, argv: list[str]) -> tuple[bool, float, str]:
@@ -85,15 +109,26 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     print(f"本地 CI（A7）——工程根：{ROOT}")
-    results: list[tuple[str, bool, float]] = []
+    # (名称, 是否通过, 耗时, 是否跳过)。跳过单独统计，不混进"通过"里凑数。
+    results: list[tuple[str, bool, float, bool]] = []
     failed = False
 
-    for i, (name, argv_i, _skippable) in enumerate(STAGES, 1):
+    for i, (name, argv_i, skippable) in enumerate(STAGES, 1):
         if name.startswith("pytest"):
             argv_i = _pytest_argv(args.cov)
         print(f"\n=== [{i}/{len(STAGES)}] {name} ===")
+
+        if name.startswith("ruff"):
+            ruff_argv = _ruff_argv()
+            if ruff_argv is None:
+                print("  SKIP  未安装 ruff（pip install ruff 或 pip install -e '.[dev]'）")
+                print("        GitHub Actions 会装上并真跑；本机跳过不算通过")
+                results.append((name, True, 0.0, True))
+                continue
+            argv_i = ruff_argv
+
         ok, elapsed, tail = _run(name, argv_i)
-        results.append((name, ok, elapsed))
+        results.append((name, ok, elapsed, False))
         print(f"  {'PASS' if ok else 'FAIL'}  {elapsed:.1f}s")
         if not ok:
             print(tail)
@@ -102,14 +137,20 @@ def main(argv: list[str] | None = None) -> int:
                 break
         elif args.cov and name.startswith("pytest") and "coverage" in tail.lower():
             print(tail)
+        elif skippable:
+            print(tail)          # 提示级关卡（PR 体积）的报告要看得见
 
     print("\n" + "=" * 56)
-    for name, ok, elapsed in results:
-        mark = "✅" if ok else "❌"
-        print(f"  {mark} {name}（{elapsed:.1f}s）")
-    total = sum(e for _, _, e in results)
-    passed = sum(1 for _, ok, _ in results if ok)
-    print(f"  合计 {passed}/{len(results)} 关通过，{total:.0f}s")
+    for name, ok, elapsed, skipped in results:
+        if skipped:
+            print(f"  ⏭  {name}（未安装 ruff，跳过）")
+        else:
+            print(f"  {'✅' if ok else '❌'} {name}（{elapsed:.1f}s）")
+    total = sum(e for _, _, e, _ in results)
+    counted = [r for r in results if not r[3]]
+    passed = sum(1 for _, ok, _, skipped in counted if ok)
+    note = f"，{len(results) - len(counted)} 关跳过" if len(counted) != len(results) else ""
+    print(f"  合计 {passed}/{len(counted)} 关通过{note}，{total:.0f}s")
     print("=" * 56)
     return 0 if not failed else 1
 

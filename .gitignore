@@ -48,6 +48,17 @@ desktop.ini
 
 # 前端构建临时目录
 web/.esbuild-tmp/
+# esbuild 新版本用 .tmpbuild 放 node 编译缓存（2.4MB，纯产物）
+web/.tmpbuild/
+
+# 菜单物料：raw/ 是 AI 生成的原图，脚本无法重建，**保留**；
+# 其余 png/svg/manifest 由 `python tools/menu_assets.py` 从 raw/ 重生成，不入库。
+docs/menu_assets/*.png
+docs/menu_assets/*.svg
+docs/menu_assets/manifest.json
+
+# 本机全量测试日志（不是工程内容）
+.local-fulltest*.log
 
 # 本机运行时产物：Ultralytics 自动生成的设置（含本机绝对路径）、旧备份包
 Ultralytics/
