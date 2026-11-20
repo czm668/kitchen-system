@@ -7,7 +7,7 @@
 四件脏活：解析请求、认令牌、发 SSE、发静态文件。分开的好处是**业务逻辑可以
 完全脱离 HTTP 单测**（`Router.call()` 直接吃 dict），不用起服务器。
 
-## 六个必须处理的现场问题
+## 七个必须处理的现场问题
 
 1. **SSE 长连接会吃线程**。`ThreadingHTTPServer` 一个连接一个线程，浏览器开
    六个标签页就是六个常驻线程。所以限制 `MAX_SSE_CLIENTS`，超了返回 503 并在
@@ -23,6 +23,17 @@
    吃穿。1MB 够一份阈值配置。
 6. **写响应要 `no-store`**。浏览器缓存一个「复位成功」，用户点十次看起来只
    生效一次。
+7. **静态资源要压缩**。用 `python -m http.server` 那套裸实现发 dist 时，浏览器
+   拿到的是未压缩字节：实测首屏 index.js 257KB + echarts 543KB + css 60KB，
+   合计 860KB **原样过网**。现场 wifi 通常 2~5Mbps，这就是 1.4~3.4 秒纯下载。
+   gzip 后同样三个文件 279KB，压掉 67%。压缩结果按 `(路径, mtime, 大小)` 缓存，
+   不重复压同一个文件。
+
+8. **客户端断开不是错误**。浏览器关标签页、按 F5、切地铁隧道，keep-alive 连接
+   会被直接 RST，标准库在 `handle_one_request` 的 `readline` 上抛
+   `ConnectionResetError`，然后 `socketserver` 打一整段 traceback（实测一次演示
+   50 段）。这不影响服务，但后台刷屏会把真正的错误淹掉。`_HttpServer.handle_error`
+   只静默「对端已断开」这一类，其余异常照常上报。
 
 ## 启动
 
@@ -32,11 +43,13 @@
 """
 from __future__ import annotations
 
+import gzip
 import json
 import logging
 import mimetypes
 import os
 import socket
+import sys
 import threading
 import time
 from http import HTTPStatus
@@ -58,6 +71,49 @@ MAX_BODY_BYTES = 1 << 20          # 1MB
 MAX_SSE_CLIENTS = 8
 SSE_MAX_SEC = 300.0               # 单条 SSE 连接寿命上限
 SSE_POLL_SEC = 0.25               # 事件轮询间隔（0.25s 足够「实时」，CPU 几乎为零）
+
+# ---------------------------------------------------------------- 静态压缩
+# 小于这个阈值不压：gzip 头加字典本身就要 18 字节左右，几百字节的响应压缩后
+# 反而更大，还多一次 CPU。
+GZIP_MIN_BYTES = 1024
+# 压缩级别取 6 而不是默认的 9：实测这三个产物 6 与 9 只差 1~2%，耗时却差 3 倍。
+# 演示环境是单核小机器，宁可少压 2% 也不要让首个请求卡住。
+GZIP_LEVEL = 6
+# 缓存条数上限。产物只有几个，这个上限只是防止长时间开发反复重建把内存撑大。
+GZIP_CACHE_MAX = 64
+# 值得压的类型。图片/字体已经是压缩格式，再压一遍只会变大。
+_GZIP_TYPES = frozenset({
+    "application/javascript", "application/json", "application/xml",
+    "image/svg+xml", "application/manifest+json",
+})
+
+
+def _compressible(ctype: str) -> bool:
+    base = ctype.split(";", 1)[0].strip().lower()
+    return base.startswith("text/") or base in _GZIP_TYPES
+
+
+def _accepts_gzip(header: str | None) -> bool:
+    """`Accept-Encoding` 里是否真的接受 gzip。
+
+    不能只判 `"gzip" in header`：`gzip;q=0` 是**明确拒绝**，按包含判断会
+    给一个声明不要压缩的客户端发 gzip，它只能解出乱码。
+    """
+    if not header:
+        return False
+    for part in header.split(","):
+        name, _, params = part.partition(";")
+        if name.strip().lower() != "gzip":
+            continue
+        for param in params.split(";"):
+            key, _, value = param.partition("=")
+            if key.strip().lower() == "q":
+                try:
+                    return float(value) > 0
+                except ValueError:
+                    return True
+        return True
+    return False
 SSE_PING_SEC = 15.0
 #: 令牌在 URL 里出现时不要进访问日志（日志会被截图进论文，泄漏令牌很蠢）
 _REDACT_KEYS = ("token", "password", "card_uid")
@@ -83,10 +139,27 @@ class _HttpServer(ThreadingHTTPServer):
 
     Unix 上相反：关掉 reuse 会让「重启服务」撞上 TIME_WAIT 而失败。所以按平台
     分开设置——这不是可选项，是两种系统上正确性要求正好相反。
+
+    **另外接管 `handle_error` 的日志**：客户端正常断开（关标签页、刷新）时
+    keep-alive 连接的 `readline` 会抛 `ConnectionResetError`，标准库把它当
+    「处理请求时发生异常」打一整段 traceback。演示一小时能刷出几十屏，真正
+    要看的那条错误就淹在里面了。这类异常对服务没有任何影响，降级成 debug。
     """
 
     daemon_threads = True
     allow_reuse_address = os.name != "nt"
+
+    #: 对端已断开的三类异常。Windows 上是 WinError 10054（ConnectionReset），
+    #: Linux 上常见的是 BrokenPipe / ConnectionAborted。
+    _DISCONNECTS = (ConnectionResetError, ConnectionAbortedError, BrokenPipeError)
+
+    def handle_error(self, request, client_address) -> None:
+        exc = sys.exc_info()[1]
+        if isinstance(exc, self._DISCONNECTS):
+            peer = client_address[0] if client_address else "-"
+            log.debug("客户端已断开（%s）：连接回收，不计错误", peer)
+            return
+        super().handle_error(request, client_address)
 
 
 class _SseBudget:
@@ -150,6 +223,10 @@ class ApiServer:
         self.login = LoginService(self.signer, self.accounts)
         self.router = Router(state, login=self.login)
         self.static_dir = Path(static_dir).resolve() if static_dir else None
+        # 压缩结果缓存：key = (绝对路径, mtime_ns, 大小)。用 mtime 参与 key，
+        # 重新构建后 hash 变、mtime 也变，天然失效，不需要手动清缓存。
+        self._gzip_cache: dict[tuple[str, int, int], bytes] = {}
+        self._gzip_lock = threading.Lock()
         # 客诉图片证据落盘目录：优先用 state 的 var_dir，退化到系统临时目录。
         from ..guest.uploads import ImageStore
         var_dir = getattr(getattr(state, "config", None), "var_dir", None)
@@ -160,6 +237,30 @@ class ApiServer:
         self.sse_budget = _SseBudget(sse_limit)
         self._httpd = httpd_cls((host, int(port)), _make_handler(self))
         self._thread: threading.Thread | None = None
+
+    # ------------------------------------------------------------ 静态压缩
+    def gzipped(self, target: Path, raw: bytes) -> bytes:
+        """返回 `raw` 的 gzip 结果，按文件状态缓存。
+
+        首次请求压一次、之后直接命中内存。对已经带 content-hash 的 assets
+        来说，一个进程生命周期内每个文件只会压一次。
+        """
+        try:
+            stat = target.stat()
+            key = (str(target), stat.st_mtime_ns, stat.st_size)
+        except OSError:
+            # 文件刚好被删/换掉：压完就返回，不进缓存
+            return gzip.compress(raw, GZIP_LEVEL)
+        with self._gzip_lock:
+            hit = self._gzip_cache.get(key)
+        if hit is not None:
+            return hit
+        packed = gzip.compress(raw, GZIP_LEVEL)
+        with self._gzip_lock:
+            if len(self._gzip_cache) >= GZIP_CACHE_MAX:
+                self._gzip_cache.clear()
+            self._gzip_cache[key] = packed
+        return packed
 
     # ------------------------------------------------------------ 生命周期
     @property
@@ -487,9 +588,24 @@ def _make_handler(server: ApiServer):
                 "application/javascript", "application/json"
             ):
                 ctype += "; charset=utf-8"
+            # 压缩判据三件：类型值得压、体积够大、客户端确实接受。
+            # 三者任一不满足就发原始字节——发错编码比不压缩严重得多。
+            compressible = _compressible(ctype)
+            body = raw
+            encoded = False
+            if (compressible and len(raw) >= GZIP_MIN_BYTES
+                    and _accepts_gzip(self.headers.get("Accept-Encoding"))):
+                body = server.gzipped(target, raw)
+                encoded = True
             self.send_response(200)
             self.send_header("Content-Type", ctype)
-            self.send_header("Content-Length", str(len(raw)))
+            if encoded:
+                self.send_header("Content-Encoding", "gzip")
+            self.send_header("Content-Length", str(len(body)))
+            # 同一个 URL 对不同 Accept-Encoding 会给出不同字节，必须声明 Vary，
+            # 否则中间的共享缓存可能把 gzip 版本发给不支持它的客户端。
+            if compressible:
+                self.send_header("Vary", "Accept-Encoding")
             # 带 hash 的 assets 长缓存；index.html 不缓存（否则发版后加载旧壳）
             hashed = "assets" in target.parts
             self.send_header("Cache-Control",
@@ -498,7 +614,7 @@ def _make_handler(server: ApiServer):
             self._cors()
             self.end_headers()
             if self.command != "HEAD":
-                self.wfile.write(raw)
+                self.wfile.write(body)
 
         # ---------------------------------------------------- SSE
         def _stream(self, query: dict[str, list[str]]) -> None:

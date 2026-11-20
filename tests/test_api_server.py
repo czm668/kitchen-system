@@ -6,6 +6,7 @@
 """
 from __future__ import annotations
 
+import gzip
 import json
 import socket
 import urllib.error
@@ -67,6 +68,15 @@ def request(server, path, *, method="GET", body=None, token=None):
             return exc.code, dict(exc.headers), json.loads(raw)
         except (json.JSONDecodeError, UnicodeDecodeError):
             return exc.code, dict(exc.headers), raw.decode("utf-8", "replace")
+
+
+def fetch_raw(server, path, *, accept_encoding=None):
+    """取原始字节 + 响应头。压缩测试不能用 `request()`——它按文本解码，gzip 会乱码。"""
+    req = urllib.request.Request(f"http://127.0.0.1:{server.port}{path}")
+    if accept_encoding is not None:
+        req.add_header("Accept-Encoding", accept_encoding)
+    with urllib.request.urlopen(req, timeout=10) as resp:
+        return resp.status, dict(resp.headers), resp.read()
 
 
 def login(server, subject="admin"):
@@ -192,6 +202,48 @@ class TestStatic:
         status, _h, payload = request(server, "/nope.css")
         assert status == 404
         assert payload["error"] == "not_found"
+
+    # -------------------------------------------------------------- 压缩
+    def test_大文件按需gzip(self, server, dist):
+        """声明接受 gzip 时发压缩字节，且解出来必须和原文件逐字节一致。"""
+        origin = "console.log('压缩测试');" * 200      # 约 5KB，过阈值
+        target = dist / "assets" / "big-abc999.js"
+        target.write_text(origin, encoding="utf-8")
+
+        status, headers, body = fetch_raw(
+            server, "/assets/big-abc999.js", accept_encoding="gzip, deflate")
+        assert status == 200
+        assert headers.get("Content-Encoding") == "gzip"
+        assert "Accept-Encoding" in headers.get("Vary", "")
+        # 长度头必须是压缩后的长度，否则浏览器会按原始长度截断/挂起
+        assert int(headers["Content-Length"]) == len(body)
+        assert len(body) < len(origin.encode("utf-8"))
+        assert gzip.decompress(body).decode("utf-8") == origin
+
+    def test_不声明接受时不压(self, server, dist):
+        """没带 Accept-Encoding（curl 默认、老客户端）必须拿到原始字节。"""
+        origin = "console.log('x');" * 200
+        (dist / "assets" / "plain-abc999.js").write_text(origin, encoding="utf-8")
+
+        _status, headers, body = fetch_raw(server, "/assets/plain-abc999.js")
+        assert "Content-Encoding" not in headers
+        assert int(headers["Content-Length"]) == len(body)
+        assert body.decode("utf-8") == origin
+
+    def test_gzip_q0视为拒绝(self, server, dist):
+        """`gzip;q=0` 是明确拒绝。按「包含 gzip」判断会把乱码发给客户端。"""
+        origin = "console.log('x');" * 200
+        (dist / "assets" / "noq-abc999.js").write_text(origin, encoding="utf-8")
+
+        _status, headers, body = fetch_raw(
+            server, "/assets/noq-abc999.js", accept_encoding="gzip;q=0, identity")
+        assert "Content-Encoding" not in headers
+        assert body.decode("utf-8") == origin
+
+    def test_小文件不压(self, server):
+        """index.html 只有几十字节，压完更大，不该压。"""
+        _status, headers, _body = fetch_raw(server, "/", accept_encoding="gzip")
+        assert "Content-Encoding" not in headers
 
 
 # =========================================================== SSE
@@ -319,3 +371,32 @@ class TestWiring:
         finally:
             api.stop()
             state.stop()
+
+
+class Test客户端断开:
+    """浏览器关标签页 / 刷新会让 keep-alive 连接直接 RST。
+
+    标准库把这件事当「处理请求时发生异常」，打一整段 traceback（实测一次
+    演示 50 段），把真正的错误淹掉。这类异常对服务没有任何影响，必须降级成
+    debug；但**其他异常仍要照常上报**，不能顺手把真错误一起吃掉。
+    """
+
+    def test_断开异常只记debug(self, server, caplog):
+        import logging
+
+        with caplog.at_level(logging.DEBUG, logger="kitchen.api.server"):
+            try:
+                raise ConnectionResetError(
+                    10054, "远程主机强迫关闭了一个现有的连接")
+            except ConnectionResetError:
+                server._httpd.handle_error(None, ("127.0.0.1", 5000))
+        rows = [r for r in caplog.records if r.name == "kitchen.api.server"]
+        assert rows, "断开也要留一条 debug 痕迹，否则排查时看不出发生过"
+        assert all(r.levelno == logging.DEBUG for r in rows)
+
+    def test_其他异常仍然打堆栈(self, server, capsys):
+        try:
+            raise ValueError("真错误")
+        except ValueError:
+            server._httpd.handle_error(None, ("127.0.0.1", 5000))
+        assert "Exception occurred" in capsys.readouterr().err

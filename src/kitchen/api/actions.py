@@ -214,7 +214,7 @@ def save_batch(state, session: Session, params, body) -> dict[str, Any]:
         old = state.repo.batch(bid)
         before = {k: (v.strftime("%Y-%m-%d %H:%M:%S") if isinstance(v, datetime) else v)
                   for k, v in old.items()}
-    except Exception:  # noqa: BLE001
+    except Exception:  # noqa: BLE001 - 新增时记录尚不存在，取不到"修改前"快照属正常
         pass
     row = {
         "id": bid, "batch_no": batch_no, "dish_id": dish_id,
@@ -253,7 +253,7 @@ def save_ingredient_batch(state, session: Session, params, body) -> dict[str, An
         old = state.repo.ingredient_batch(bid)
         before = {k: (v.strftime("%Y-%m-%d %H:%M:%S") if isinstance(v, datetime) else v)
                   for k, v in old.items()}
-    except Exception:  # noqa: BLE001
+    except Exception:  # noqa: BLE001 - 新增时记录尚不存在，取不到"修改前"快照属正常
         pass
     inspection = body.get("inspection")
     if isinstance(inspection, str):
@@ -297,7 +297,7 @@ def save_trace(state, session: Session, params, body) -> dict[str, Any]:
         # 审计记录要能 JSON 序列化：仓储里的 created_at 是 datetime，先转字符串
         before = {k: (v.strftime("%Y-%m-%d %H:%M:%S") if isinstance(v, datetime) else v)
                   for k, v in old.items()}
-    except Exception:  # noqa: BLE001
+    except Exception:  # noqa: BLE001 - 新增时记录尚不存在，取不到"修改前"快照属正常
         pass
     row = {
         "id": tid, "code": code,

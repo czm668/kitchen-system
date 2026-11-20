@@ -64,10 +64,41 @@ except OSError:  # 只读盘/权限不足时退回系统默认，不阻断测试
     tempfile.tempdir = None
 
 
+def _prune_old_runs(root: Path, keep_hours: float = 3.0) -> None:
+    """删掉几小时前的 `pytest-run-*` 目录，避免每跑一次留一堆。
+
+    只碰自己命名空间下的目录，且全程忽略错误：清不掉（文件仍被占用）就留着，
+    不能让清理本身把一次测试跑挂掉。
+    """
+    import shutil
+    import time as _time
+
+    cutoff = _time.time() - keep_hours * 3600
+    try:
+        entries = list(root.glob("pytest-run-*"))
+    except OSError:
+        return
+    for entry in entries:
+        try:
+            if entry.is_dir() and entry.stat().st_mtime < cutoff:
+                shutil.rmtree(entry, ignore_errors=True)
+        except OSError:
+            continue
+
+
 def pytest_configure(config) -> None:
-    """显式接管 pytest 的 basetemp，避免它按 gettempdir() 回退到工程根。"""
+    """显式接管 pytest 的 basetemp，避免它按 gettempdir() 回退到工程根。
+
+    ## 为什么每次跑用一个新目录，而不是固定的 `pytest-run`
+    原来写死 `_TMP_ROOT / "pytest-run"`，pytest 每次开会话先清空这个目录再建。
+    Windows 上这一步经常失败：上一轮有测试起的服务线程没随进程结束释放 sqlite
+    文件句柄，`rmtree` 报「目录不是空的」，接着 `mkdir` 撞上 FileExistsError，
+    **整个文件里的用例全部 ERROR**——但单独重跑那个文件又是全绿，看起来像随机
+    失败。改成按进程号分目录后，既不依赖删除成功，也天然隔离并发跑的两轮。
+    """
     if not config.option.basetemp:
-        config.option.basetemp = str(_TMP_ROOT / "pytest-run")
+        _prune_old_runs(_TMP_ROOT)
+        config.option.basetemp = str(_TMP_ROOT / f"pytest-run-{os.getpid()}")
 
 
 # ---------------------------------------------------------------- 规则测试公共数据

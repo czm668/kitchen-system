@@ -20,8 +20,10 @@ def repo() -> MemoryProcessRepository:
 class TestSeed:
     def test_七类资料都有(self, repo):
         snap = repo.snapshot()
+        # 菜品 26 = 原 24 + A24「以图定菜」补的炸春卷(D-CJ) / 豆角炒肉丝(D-DJRS)：
+        # 生成图实际呈现的就是这两道菜，补菜品比硬把图安到别的菜名上更诚实。
         assert snap == {
-            "dishes": 24, "stations": 2, "recipes": 2, "recipe_items": 6,
+            "dishes": 26, "stations": 2, "recipes": 2, "recipe_items": 6,
             "sop_steps": 8, "suppliers": 5, "batches": 24,
             "ingredient_batches": 49, "trace_codes": 24,
         }

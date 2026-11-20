@@ -111,6 +111,8 @@ class TestApiPaths:
             # 管理端只做审批（对应 POST 已在 GuestView.vue 里有入口）
             "/api/customer/guest/complaints",
             "/api/customer/guest/complaints/{complaint_id}/supplement",
+            # 结案回访：只在顾客端工单卡上点星，管理端不代评（代评等于伪造满意度）
+            "/api/customer/guest/complaints/{complaint_id}/feedback",
             # 对话式客服（小程序 chat 页调用，管理端无入口）
             "/api/customer/guest/chat",
         }
