@@ -2,7 +2,7 @@
 
 [![ci](https://github.com/czm668/kitchen-system/actions/workflows/ci.yml/badge.svg)](https://github.com/czm668/kitchen-system/actions/workflows/ci.yml)
 [![python](https://img.shields.io/badge/python-3.11-3776ab)](pyproject.toml)
-[![tests](https://img.shields.io/badge/tests-1697-brightgreen)](tests)
+[![tests](https://img.shields.io/badge/tests-1709-brightgreen)](tests)
 [![license](https://img.shields.io/badge/license-non--commercial-red)](LICENSE)
 
 > 定稿题目《基于 ESP32 的后厨智能调度与食安合规管理系统的设计与实现》
@@ -36,7 +36,7 @@ flowchart TB
     WEB["Vue 3 管理端（12 视图）"]
   end
   subgraph S["服务端（单进程）"]
-    API["HTTP API：101 个接口"]
+    API["HTTP API：102 个接口"]
     CORE["领域内核：安全判定 / 人员准入 / 过程执行 / 客服"]
     ST["AppState：内存态 + 事件流（SSE）"]
   end
@@ -69,8 +69,8 @@ flowchart TB
 |---|---|
 | 领域代码 | 103 个模块 / 31,683 行 Python（运行时零第三方依赖） |
 | 数据 | 51 张表 · 19 个版本化迁移 · 4 张核心状态机 |
-| 接口 | 101 个 HTTP 接口（主路由 65 + 扩展 36） |
-| 测试 | 1697 项 pytest，覆盖判定边界、状态机、存储双后端、接口契约 |
+| 接口 | 102 个 HTTP 接口（主路由 65 + 扩展 37） |
+| 测试 | 1709 项 pytest，覆盖判定边界、状态机、存储双后端、接口契约 |
 | 前端 | Vue 3 管理端 12 视图；小程序 9 页 |
 | 部署 | Docker Compose 三容器，阿里云 1 GiB 实测共占 206 MB |
 
@@ -89,7 +89,7 @@ flowchart TB
 `tools/demos/` 下全是离线演示脚本，**不是服务入口**——别从那里挑一个跑就以为服务起来了。
 
 ```bash
-# 1) 单测（1697 项，纯标准库，不装任何依赖）
+# 1) 单测（1709 项，纯标准库，不装任何依赖）
 python -m pytest -q
 
 # 2) 本地 CI：审查守卫 / ruff 语法 / R5 时钟 / 数字 / 单测 / 迁移 / 前端 / 小程序 / PR 体积提示
@@ -228,7 +228,7 @@ kitchen-system/                     ← 毕设项目根（文档 + 代码分开�
 │       │   │   ├── auth.py                     四角色九权限 + 令牌签名 + 登录锁定（默认拒绝）
 │       │   │   ├── accounts.py                 账号表（KITCHEN_ACCOUNTS 可覆盖）+ 口令哈希
 │       │   │   ├── audit.py                    操作留痕（含被拒绝的动作）
-│       │   │   ├── routes.py                   65 条主路由（扩展 36 条在 *_api.py，合计 101 个 HTTP 接口）
+│       │   │   ├── routes.py                   65 条主路由（扩展 37 条在 *_api.py，合计 102 个 HTTP 接口）
 │       │   │   ├── views.py                    只读视图（订单/甘特/遥测/工单/KPI/参数…）
 │       │   │   ├── actions.py                  写动作（下单/派单/通道/阈值/配方版本/注入）
 │       │   │   ├── state.py                    AppState 门面：装配六域 + 线程安全快照
@@ -267,7 +267,7 @@ kitchen-system/                     ← 毕设项目根（文档 + 代码分开�
 │       │   ├── vision_dataset.yaml        视觉数据集配置（names 顺序 = 模型 class id）
 │       │   └── seed_kitchen.sql           种子数据（工位/菜品配方SOP/员工工牌/监测点阈值）
 │       ├── firmware/esp32cam/         ESP32-CAM MJPEG 推流（草图，未编译；引脚表+供电规范）
-│       ├── tests/                     1697 条单测（含 MQTT 链路 6 条、调度器 9 条、prod 安全 4 条）
+│       ├── tests/                     1709 条单测（含 MQTT 链路 6 条、调度器 9 条、prod 安全 4 条）
 │       │   └── fixtures/qr_golden.json    二维码基准哈希（满容量用例由 segno 逐掩码比对确认）
 │       ├── tools/
 │       │   ├── legacy.py                  旧目录素材取用器（list / fetch / verify / check）
@@ -328,7 +328,7 @@ web/
 PY="python"     # 本机便携版：D:/liulan1/毕设/.local/python311/python.exe
 cd "02_项目代码/kitchen"
 
-# 跑全部单测（1697 条）
+# 跑全部单测（1709 条）
 # MQTT 真链路演示（A2）：python tools/demos/mqtt_demo.py --amqtt
 "$PY" -m pytest -q
 
