@@ -107,6 +107,9 @@
           {{reply.state === 'auto_closed' ? '已答复' : '已受理'}}
         </view>
       </view>
+      <view wx:if="{{reply.handoff_text}}" class="handoff-line {{reply.handoff_level}}">
+        {{reply.handoff_text}}
+      </view>
       <view class="caption" style="margin-top: 12rpx;">AI 分类：{{reply.category}} · {{reply.ai_mode === 'live' ? '在线模型' : '离线规则引擎'}}</view>
       <view wx:if="{{reply.stage_label}}" class="caption" style="margin-top: 8rpx;">
         当前环节：{{reply.stage_label}}
@@ -140,6 +143,9 @@
         <view class="badge {{item.state_tone}} badge--sm">{{item.state_label}}</view>
       </view>
       <view class="muted" style="margin-top: 10rpx;">{{item.category}} · {{item.text}}</view>
+      <view wx:if="{{item.handoff_text}}" class="handoff-line {{item.handoff_level}}">
+        {{item.handoff_text}}
+      </view>
       <view wx:if="{{item.blocker}}" class="caption" style="margin-top: 8rpx;">
         环节：{{item.stage_label}} · 卡点：{{item.blocker}}
         <text wx:if="{{item.overdue}}" class="badge danger badge--sm" style="margin-left: 8rpx;">已超时</text>
@@ -171,7 +177,21 @@
         补偿凭证 {{item.voucher_no}}
       </view>
       <view wx:if="{{item.reject_reason}}" class="caption" style="margin-top: 8rpx;">
-        驳回原因：{{item.reject_reason}}
+        驳回说明：{{item.reject_reason}}
+      </view>
+      <view wx:if="{{item.reject_hint}}" class="caption" style="margin-top: 4rpx;">
+        下一步：{{item.reject_hint}}
+      </view>
+      <view wx:if="{{item.need_feedback}}" class="rate-row">
+        <text class="caption">这次处理满意吗？点星评价</text>
+        <view class="rate-stars">
+          <text wx:for="{{item.star_list}}" wx:for-item="s" wx:key="*this"
+                class="rate-star" data-id="{{item.id}}" data-score="{{s}}"
+                bindtap="rate">{{s <= item.feedback_score ? '★' : '☆'}}</text>
+        </view>
+      </view>
+      <view wx:elif="{{item.feedback_score}}" class="caption" style="margin-top: 8rpx;">
+        您给了 {{item.feedback_score}} 星，感谢反馈
       </view>
       <view wx:if="{{item.can_supplement}}" class="submit-btn ghost"
             bindtap="supplement" data-id="{{item.id}}" data-version="{{item.version}}">

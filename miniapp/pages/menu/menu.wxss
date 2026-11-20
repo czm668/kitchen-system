@@ -1,5 +1,100 @@
 @import "../../templates/common.wxss";
 
+/* ---------------------------------------------------------------- 首屏横幅 */
+.hero {
+  margin: 16rpx 24rpx 0;
+  border-radius: 20rpx;
+  overflow: hidden;
+  box-shadow: var(--shadow, 0 8rpx 24rpx rgba(0,0,0,.06));
+  /* 图是 1080×350（约 3.1:1），卡片按同比例留高，不裁到字 */
+  height: 232rpx;
+}
+.hero__img { width: 100%; height: 100%; display: block; }
+
+/* ---------------------------------------------------------------- 菜品卡 */
+.dish {
+  display: flex;
+  flex-direction: row;
+  background: var(--panel, #fffdf8);
+  border-radius: var(--radius, 18rpx);
+  margin: 16rpx 24rpx;
+  padding: 20rpx;
+  box-shadow: var(--shadow, 0 8rpx 24rpx rgba(0,0,0,.05));
+}
+.dish--off { opacity: .62; }
+.dish:active { opacity: .72; }
+
+/* 缩略位固定 200×150rpx：一行两列信息对得齐，图片不致于把卡片撑得一高一低 */
+.dish__thumb {
+  position: relative;
+  width: 200rpx;
+  height: 150rpx;
+  flex-shrink: 0;
+  border-radius: 12rpx;
+  overflow: hidden;
+  background: var(--panel-2, #f1ebdd);
+}
+.dish__img { width: 100%; height: 100%; display: block; }
+/* 无图回退：一个安静的色块 + 品类字，比破图图标体面 */
+.dish__ph {
+  width: 100%; height: 100%;
+  display: flex; align-items: center; justify-content: center;
+  color: var(--text-3, #988f7f); font-size: 24rpx;
+  background: linear-gradient(160deg, #f7f3ea, #ece6da);
+}
+.dish__mask {
+  position: absolute; left: 0; right: 0; bottom: 0;
+  background: rgba(36,31,24,.58);
+  color: #fff; font-size: 20rpx; line-height: 1.6;
+  text-align: center;
+}
+.dish__flag {
+  position: absolute; left: 8rpx; top: 8rpx;
+  background: rgba(178,104,10,.92);
+  color: #fff; font-size: 20rpx; font-weight: 600;
+  padding: 2rpx 10rpx; border-radius: 6rpx;
+}
+
+.dish__main {
+  flex: 1;
+  min-width: 0;                 /* 关键：不加这行，长菜名会把价格顶出卡片 */
+  margin-left: 20rpx;
+  display: flex;
+  flex-direction: column;
+}
+/* 菜名最多两行，超出截断——16 字以上在 320px 宽屏上本来就摆不开 */
+.dish__name {
+  font-size: 30rpx;
+  font-weight: 600;
+  line-height: 1.35;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+.dish__price {
+  color: var(--price, #b4471f);
+  font-weight: 700;
+  font-size: 32rpx;
+  flex-shrink: 0;               /* 价格永不被菜名挤掉 */
+}
+.dish__meta { color: var(--text-3, #988f7f); font-size: 22rpx; margin-top: 6rpx; }
+.dish__note {
+  margin-top: 8rpx;
+  font-size: 22rpx;
+  color: var(--orange, #b2680a);
+  background: rgba(178,104,10,.08);
+  border-radius: 8rpx;
+  padding: 4rpx 10rpx;
+  align-self: flex-start;
+  max-width: 100%;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+/* ---------------------------------------------------------------- 详情弹层 */
 .sheet-mask {
   position: fixed; left: 0; right: 0; top: 0; bottom: 0;
   background: rgba(0, 0, 0, .35);
@@ -7,10 +102,22 @@
 }
 .sheet {
   width: 100%; box-sizing: border-box;
-  background: #fff;
+  background: var(--panel, #fffdf8);
   border-radius: 32rpx 32rpx 0 0;
-  padding: 40rpx 32rpx calc(40rpx + env(safe-area-inset-bottom));
+  padding: 24rpx 32rpx calc(40rpx + env(safe-area-inset-bottom));
   box-shadow: 0 -12rpx 40rpx rgba(0, 0, 0, .12);
   animation: sheet-up .24s ease both;
+}
+.sheet__grab {
+  width: 72rpx; height: 8rpx; border-radius: 999rpx;
+  background: var(--line, #e6dfd0);
+  margin: 0 auto 20rpx;
+}
+.sheet__img {
+  width: 100%; height: 340rpx;
+  border-radius: 16rpx; margin-top: 16rpx;
+  display: block;
+  /* 与菜品图同源的米白，aspectFit 留出的两侧不空得像破版 */
+  background: linear-gradient(160deg, #f7f3ea, #ece6da);
 }
 @keyframes sheet-up { from { opacity: .4; } to { opacity: 1; } }

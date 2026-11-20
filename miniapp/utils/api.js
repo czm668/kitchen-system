@@ -32,6 +32,7 @@ var store = require('./store.js');
 
 var _pending = 0;        // 全局请求计数（页面可据此显示顶部加载态）
 var _reopening = null;   // 并发 401 的唯一重开 Promise
+var _sessionNotified = false;  // 重试成功只提示一次，避免轮询页反复弹窗
 
 // 自愈相关状态（模块级，整个小程序生命周期共享）
 var _fallbackChecking = null;    // 并发失败共享的探测 Promise
@@ -250,6 +251,12 @@ function reopenSession() {
   clearToken();
   _reopening = openSession().then(function (token) {
     _reopening = null;
+    // 401 在 Console 里看着吓人，但恢复是自动的。弹一次提示，
+    // 让演示者知道「页面数据回来了」而不是以为只是缓存没刷。
+    if (!_sessionNotified) {
+      _sessionNotified = true;
+      wx.showToast({ title: '已重新开桌，继续演示', icon: 'none' });
+    }
     return token;
   }).catch(function (err) {
     _reopening = null;
@@ -260,15 +267,26 @@ function reopenSession() {
 
 // 带令牌的请求；401 → 自动重开桌一次再重试读操作
 function authed(method, path, data, options) {
-  var payload = Object.assign({ customer_token: getToken() }, data || {});
-  return request(method, path, payload, options).catch(function (err) {
-    if (err.status !== 401) { throw err; }
-    return reopenSession().then(function () {
-      if (method !== 'GET') { throw err; }   // 写操作不重试，见文件头
-      var retry = Object.assign({ customer_token: getToken() }, data || {});
-      return request(method, path, retry, options);
+  var opts = options || {};
+  function send() {
+    var payload = Object.assign({ customer_token: getToken() }, data || {});
+    return request(method, path, payload, opts).catch(function (err) {
+      if (err.status !== 401) { throw err; }
+      return reopenSession().then(function () {
+        if (method !== 'GET') { throw err; }   // 写操作不重试，见文件头
+        var retry = Object.assign({ customer_token: getToken() }, data || {});
+        return request(method, path, retry, opts);
+      });
     });
-  });
+  }
+  // 冷启动首屏：app.onLaunch 可能正在开桌。等它落盘再发请求，
+  // 否则页面 onLoad 必然先吃一次 401，Console 里像故障其实是竞态。
+  if (getToken()) { return send(); }
+  var app = null;
+  try { app = getApp(); } catch (e) { /* 尚未初始化 */ }
+  var ready = app && app.globalData && app.globalData.sessionReady;
+  if (!ready) { return send(); }
+  return Promise.resolve(ready).catch(function () { return null; }).then(send);
 }
 
 // 「我的」页的服务连通性探测：匿名、只读、无副作用

@@ -71,6 +71,17 @@ Page({
       self.setData({ sending: false, thinking: false });
       var extra = { kind: INTENT_KIND[data.intent] || '' };
       if (data.data && data.data.complaint_no) { extra.ticket = data.data.complaint_no; }
+      // 后端分级接管（guest/handoff.py）：转人工时给出「谁几分钟到场」，
+      // 让顾客知道不是「已转交」三个字就完了。
+      var esc = (data.data && data.data.handoff) || null;
+      if (esc && esc.level && esc.level !== 'self_service') {
+        var note = esc.label || '人工接管';
+        if (esc.owner) { note += ' · ' + esc.owner; }
+        if (esc.promise_min) { note += ' ' + esc.promise_min + ' 分钟内到场'; }
+        extra.handoffNote = note;
+        extra.handoffLevel = esc.level;
+        if (esc.level === 'human_now') { extra.kind = '已转人工'; }
+      }
       self.pushAi(data.reply || '我记下了，稍后帮你看看。', extra);
       // 若刚生成了工单，提示可去客服页看进度
       if (data.action === 'complaint') {

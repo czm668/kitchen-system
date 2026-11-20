@@ -1,1 +1,32 @@
 @import "../../templates/common.wxss";
+
+/* 菜品进度卡头部：左图 + 菜名，右侧状态徽标。
+   图占 88rpx，比订单列表（72）大一点——这里一屏只放两三道菜，图可以当锚点。 */
+.item-head { align-items: center; }
+.item-head__main {
+  display: flex; flex-direction: row; align-items: center;
+  flex: 1;
+  min-width: 0;              /* 不加这行，长菜名会把状态徽标顶出卡片 */
+}
+.item-head__name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.detail-thumb {
+  width: 88rpx; height: 88rpx;
+  flex-shrink: 0;
+  margin-right: 20rpx;
+  border-radius: 10rpx;
+  overflow: hidden;
+  background: var(--panel-2, #f1ebdd);
+}
+.detail-thumb__img { width: 100%; height: 100%; display: block; }
+.detail-thumb__ph {
+  width: 100%; height: 100%;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 22rpx; color: var(--text-3, #988f7f);
+  background: linear-gradient(160deg, #f7f3ea, #ece6da);
+}

@@ -39,8 +39,10 @@ Page({
     view: null,
     error: '',
     loading: false,
-    labelUrl: '',
+    labelUrl: '',       // 服务端 label.png 的 HTTP 地址（留档，不直接给 <image>）
+    labelSrc: '',       // 本地临时文件路径：<image> 只认这个
     labelFailed: false,
+    labelLoading: false,
     history: [],
     historyTexts: {},
     demoCodes: DEMO_CODES
@@ -151,10 +153,12 @@ Page({
       view.ingredients = that.buildIngredients(data.ingredients || []);
       view.proof = that.buildProof(data.proof, data.recipe);
       store.pushTraceHistory(code, data.dish || '');
+      var remote = api.getBaseUrl() + (data.qr_url || '');
       that.setData({
         loading: false, view: view, code: code,
-        labelUrl: api.getBaseUrl() + (data.qr_url || '')
+        labelUrl: remote, labelSrc: '', labelFailed: false
       });
+      that.loadLabel(code, remote);
       that.syncHistory();
     }).catch(function (err) {
       that.setData({
@@ -295,7 +299,50 @@ Page({
     };
   },
 
-  onImageError: function () { this.setData({ labelFailed: true }); },
+  // 基础库 3.18.0 起 <image> 直接拒绝 http 图片，勾了「不校验合法域名」也没用；
+  // 但 wx.request 在开发模式仍能取到 PNG 二进制。于是把图落到 USER_DATA_PATH，
+  // 再把本地路径交给 <image>——不依赖 HTTPS 域名，也不用引第三方 QR 库。
+  loadLabel: function (code, url) {
+    var that = this;
+    if (!url) { this.setData({ labelFailed: true, labelLoading: false }); return; }
+    this.setData({ labelLoading: true, labelFailed: false });
+    wx.request({
+      url: url,
+      method: 'GET',
+      responseType: 'arraybuffer',
+      timeout: 8000,
+      success: function (res) {
+        // 连续查两个码时，旧请求的回调不能覆盖新结果的图
+        if (that.data.code !== code) { return; }
+        if (res.statusCode !== 200 || !res.data) {
+          that.setData({ labelFailed: true, labelLoading: false }); return;
+        }
+        var safe = String(code).replace(/[^A-Za-z0-9_-]/g, '_').slice(0, 40);
+        var path = wx.env.USER_DATA_PATH + '/trace_label_' + safe + '.png';
+        wx.getFileSystemManager().writeFile({
+          filePath: path,
+          data: res.data,
+          success: function () {
+            if (that.data.code !== code) { return; }
+            that.setData({ labelSrc: path, labelLoading: false, labelFailed: false });
+          },
+          fail: function () { that.setData({ labelFailed: true, labelLoading: false }); }
+        });
+      },
+      fail: function () {
+        if (that.data.code !== code) { return; }
+        that.setData({ labelFailed: true, labelLoading: false });
+      }
+    });
+  },
+
+  reloadLabel: function () {
+    if (this.data.code && this.data.labelUrl) {
+      this.loadLabel(this.data.code, this.data.labelUrl);
+    }
+  },
+
+  onImageError: function () { this.setData({ labelFailed: true, labelLoading: false }); },
 
   copyCode: function () {
     if (!this.data.view) { return; }
@@ -311,7 +358,8 @@ Page({
   // 从结果页回到初始查询态（空态引导 + 示例码列表重新出现）。
   // 用 that 风格无关，这里是事件回调直接绑定在 page 上，this 即 page。
   backToList: function () {
-    this.setData({ view: null, error: '', code: '', labelUrl: '', labelFailed: false });
+    this.setData({ view: null, error: '', code: '', labelUrl: '', labelSrc: '',
+                   labelFailed: false, labelLoading: false });
   },
   emptyAction: function () { /* 溯源页无空态按钮 */ }
 });

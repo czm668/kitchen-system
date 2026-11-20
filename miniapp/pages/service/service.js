@@ -37,6 +37,17 @@ function relEvidenceUrl(url) {
   return url;
 }
 
+// 转人工分级（后端 guest/handoff.py）：self_service 不显示，其余显示「谁几分钟到场」。
+// 只展示「有人回您」的时限，不展示任何补偿承诺——补偿仍走审批。
+function handoffText(esc) {
+  esc = esc || {};
+  if (!esc.level || esc.level === 'self_service') { return ''; }
+  var line = esc.label || '人工接管';
+  if (esc.owner) { line += ' · ' + esc.owner; }
+  if (esc.promise_min) { line += ' ' + esc.promise_min + ' 分钟内到场'; }
+  return line;
+}
+
 Page({
   data: {
     guestKey: '',
@@ -120,18 +131,30 @@ Page({
   decorate: function (row) {
     var meta = STATE[row.state] || { label: row.state, tone: 'plain' };
     var ai = row.ai_suggestion || {};
+    var handoff = row.handoff || {};
     return {
       id: row.id, complaint_no: row.complaint_no, text: row.text,
       category: row.category, state: row.state,
       state_label: meta.label, state_tone: meta.tone,
       amount: row.amount, wants_refund: row.wants_refund,
-      voucher_no: row.voucher_no, reject_reason: row.reject_reason,
+      voucher_no: row.voucher_no,
+      // 顾客侧只显示对客说明：reject_reason 是管理端内部口径（金额上限、
+      // 复核规则等），不能直接推给顾客；旧工单无 customer_reason 时兜底。
+      reject_reason: row.customer_reason || row.reject_reason,
+      reject_hint: row.customer_hint
+        ? (row.customer_hint.next + '（' + row.customer_hint.days + ' 天内）') : '',
+      need_feedback: !!row.need_feedback,
+      feedback_score: row.feedback_score || 0,
+      star_list: [1, 2, 3, 4, 5],
       reviewer: row.reviewer, approver: row.approver,
       version: row.version,
       ai_summary: ai.summary || '',
       ai_reply: row.ai_reply || '',
       ai_mode_label: ai.mode === 'live' ? '在线模型' : '离线规则引擎',
       degraded: ai.degraded_reason || '',
+      handoff_text: handoffText(handoff),
+      handoff_level: handoff.level || '',
+      handoff_owner: handoff.owner || '',
       stage_label: row.stage_label || meta.label,
       blocker: row.blocker || '',
       blocker_owner: row.blocker_owner || '',
@@ -312,6 +335,8 @@ Page({
           return a.detail || a.type;
         }).join('；');
         data.urgent_text = (data.urgent || []).join('；');
+        data.handoff_text = handoffText(data.handoff);
+        data.handoff_level = (data.handoff || {}).level || '';
         that.setData({
           submitting: false, reply: data, text: '', evidenceText: '',
           evidenceImages: [], wantsRefund: false
@@ -350,6 +375,21 @@ Page({
           wx.showModal({ title: '提交失败', content: err.message || '请刷新后重试', showCancel: false });
         });
       }
+    });
+  },
+
+  // 结案回访：点星即提交，一单一次（服务端也会拦重复评价）
+  rate: function (e) {
+    var that = this;
+    var id = Number(e.currentTarget.dataset.id);
+    var score = Number(e.currentTarget.dataset.score);
+    api.authed('POST', '/api/customer/guest/complaints/' + id + '/feedback', {
+      guest_key: api.getGuestKey(), score: score
+    }).then(function () {
+      wx.showToast({ title: score <= 2 ? '已反馈，店长会联系您' : '谢谢您的评价', icon: 'none' });
+      that.refresh();
+    }).catch(function (err) {
+      wx.showModal({ title: '评价失败', content: err.message || '请稍后重试', showCancel: false });
     });
   },
 

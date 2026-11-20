@@ -35,6 +35,7 @@ Page({
       return {
         code: row.code, name: row.name, qty: row.qty,
         category: row.category, estimate_minutes: row.estimate_minutes,
+        image: fmt.imageOf(row.code),        // 与菜单页同一套图，缺图时走占位块
         price_text: fmt.money(row.price),
         subtotal_text: fmt.money(row.qty * Number(row.price || 0))
       };

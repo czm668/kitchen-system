@@ -6,6 +6,9 @@
 
 var STAGES = ['已受理', '排队中', '已派单', '制作中', '已出锅', '已上桌'];
 
+// 菜品图映射（tools/menu_assets.py 生成）。有 code 就有图，没有就走无图版式。
+var dishImages = require('./dish_images.js');
+
 var STATE_MAP = {
   created:    { label: '已受理', stage: 0, tone: 'plain' },
   pending:    { label: '排队中', stage: 1, tone: 'info' },
@@ -28,6 +31,8 @@ function decorateItem(item) {
   var meta = stateOf(item.state);
   var copy = {};
   Object.keys(item).forEach(function (k) { copy[k] = item[k]; });
+  // 配图走 dish_code（后端查单接口给的）；老接口没这个字段时留空，WXML 退化成纯文字行
+  copy.image = dishImages[item.dish_code] || '';
   copy.state_label = meta.label;
   copy.state_tone = meta.tone;
   copy.stage = meta.stage;
@@ -78,6 +83,11 @@ function money(value) {
   return n.toFixed(2);
 }
 
+// 按菜品编码取包内图；没有图返回空串，调用方用占位块兜底
+function imageOf(code) {
+  return (code && dishImages[code]) || '';
+}
+
 function tokenShort(token) {
   var text = String(token || '');
   return text ? text.slice(0, 8) + '…' + text.slice(-4) : '未开桌';
@@ -97,6 +107,7 @@ module.exports = {
   stateOf: stateOf,
   decorateItem: decorateItem,
   decorateOrder: decorateOrder,
+  imageOf: imageOf,
   timeText: timeText,
   money: money,
   tokenShort: tokenShort,

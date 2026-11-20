@@ -41,6 +41,11 @@
       <view class="caption" style="margin-top: 8rpx;">整单进度 {{item.percent}}% · 共 {{item.item_count}} 份</view>
 
       <view wx:for="{{item.items}}" wx:for-item="dish" wx:key="id" class="dish-row">
+        <view class="dish-thumb">
+          <image wx:if="{{dish.image}}" class="dish-thumb__img" src="{{dish.image}}"
+                 mode="aspectFill" lazy-load/>
+          <view wx:else class="dish-thumb__ph">菜</view>
+        </view>
         <view class="grow">
           <view class="row gap-8">
             <text>{{dish.dish_name}} × {{dish.qty}}</text>

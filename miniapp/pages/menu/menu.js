@@ -3,6 +3,8 @@
 var api = require('../../utils/api.js');
 var store = require('../../utils/store.js');
 var fmt = require('../../utils/format.js');
+var dishImages = require('../../utils/dish_images.js');   // 自动生成：code → 包内图路径
+var visual = require('../../utils/menu_visual.js');       // 运营位与卖点（人手维护）
 
 Page({
   data: {
@@ -16,7 +18,9 @@ Page({
     cartMoney: '0.00',
     loading: true,
     error: '',
-    detail: null         // 菜品详情弹层
+    detail: null,        // 菜品详情弹层
+    banner: visual.banner,
+    soldOutMask: visual.soldOutMask
   },
 
   onLoad: function () { this.reload(); },
@@ -49,6 +53,9 @@ Page({
           price: d.price, price_text: fmt.money(d.price),
           sold_out: !!d.sold_out, estimate_minutes: d.estimate_minutes || 0,
           unavailable_reason: d.unavailable_reason || '',
+          image: dishImages[d.code] || '',            // 没图不报错，走 .dish__ph 回退块
+          featured: Object.prototype.hasOwnProperty.call(visual.featured, d.code),
+          note: visual.featured[d.code] || '',        // 卖点只在主推位出现
           qty: 0
         };
       });
@@ -96,7 +103,28 @@ Page({
       }
       return true;
     });
+    // 首屏要能看见主推：只在「全部分类 + 无搜索」时把主推位前置，其余保持原序，
+    // 免得搜索/分类结果里菜品顺序跳来跳去
+    if (cat === '全部' && !kw) {
+      rows = rows.slice().sort(function (a, b) {
+        return (b.featured ? 1 : 0) - (a.featured ? 1 : 0);
+      });
+    }
     this.setData({ visible: rows });
+  },
+
+  // 图挂了就退化成分类占位块，不回退成破图
+  onImgError: function (e) {
+    var code = e.currentTarget.dataset.code;
+    var list = this.data.dishes.map(function (d) {
+      if (d.code !== code) { return d; }
+      var copy = {};
+      Object.keys(d).forEach(function (k) { copy[k] = d[k]; });
+      copy.image = '';
+      return copy;
+    });
+    this.setData({ dishes: list });
+    this.applyFilter(list);
   },
 
   onSearch: function (e) {

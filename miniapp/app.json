@@ -12,22 +12,42 @@
   ],
   "window": {
     "navigationBarTitleText": "云后厨",
-    "navigationBarBackgroundColor": "#ffffff",
+    "navigationBarBackgroundColor": "#fffdf8",
     "navigationBarTextStyle": "black",
-    "backgroundColor": "#f5f5f7",
+    "backgroundColor": "#f6f2e8",
     "backgroundTextStyle": "light",
     "enablePullDownRefresh": false
   },
   "tabBar": {
-    "color": "#6e6e73",
-    "selectedColor": "#0071e3",
-    "backgroundColor": "#ffffff",
+    "color": "#6b6355",
+    "selectedColor": "#1f4d3a",
+    "backgroundColor": "#fffdf8",
     "borderStyle": "white",
     "list": [
-      { "pagePath": "pages/menu/menu", "text": "点菜" },
-      { "pagePath": "pages/orders/orders", "text": "订单" },
-      { "pagePath": "pages/trace/trace", "text": "溯源" },
-      { "pagePath": "pages/profile/profile", "text": "我的" }
+      {
+        "pagePath": "pages/menu/menu",
+        "text": "点菜",
+        "iconPath": "assets/tabbar/tab_menu.png",
+        "selectedIconPath": "assets/tabbar/tab_menu_on.png"
+      },
+      {
+        "pagePath": "pages/orders/orders",
+        "text": "订单",
+        "iconPath": "assets/tabbar/tab_orders.png",
+        "selectedIconPath": "assets/tabbar/tab_orders_on.png"
+      },
+      {
+        "pagePath": "pages/trace/trace",
+        "text": "溯源",
+        "iconPath": "assets/tabbar/tab_trace.png",
+        "selectedIconPath": "assets/tabbar/tab_trace_on.png"
+      },
+      {
+        "pagePath": "pages/profile/profile",
+        "text": "我的",
+        "iconPath": "assets/tabbar/tab_profile.png",
+        "selectedIconPath": "assets/tabbar/tab_profile_on.png"
+      }
     ]
   },
   "style": "v2",

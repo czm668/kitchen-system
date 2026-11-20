@@ -75,9 +75,12 @@
 
       <view class="row" style="align-items: flex-start;">
         <view class="qr-box">
-          <image wx:if="{{!labelFailed}}" src="{{labelUrl}}" mode="aspectFit"
+          <!-- 不把 HTTP 地址直接给 <image>：基础库 3.18+ 会拒图。
+               labelSrc 是 trace.js 用 wx.request(arraybuffer) 落盘的本地路径 -->
+          <image wx:if="{{labelSrc && !labelFailed}}" src="{{labelSrc}}" mode="aspectFit"
                  class="qr-img" binderror="onImageError" />
-          <view wx:else class="qr-fallback caption">标签图加载失败<br/>请检查服务地址</view>
+          <view wx:elif="{{labelFailed}}" class="qr-fallback caption" bindtap="reloadLabel">标签图加载失败<br/>点此重新载图</view>
+          <view wx:else class="qr-fallback caption">标签图载入中…</view>
         </view>
         <view class="grow" style="margin-left: 24rpx;">
           <view class="kv"><text class="kv__k">溯源码</text>

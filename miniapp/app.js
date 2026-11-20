@@ -10,7 +10,8 @@ App({
   globalData: {
     version: config.VERSION,
     baseUrl: config.BASE_URL,   // onLaunch 会覆盖成实际生效地址（含手机上的自定义值）
-    tableId: config.DEFAULT_TABLE
+    tableId: config.DEFAULT_TABLE,
+    sessionReady: null          // 开桌中的 Promise，authed() 会等它落盘再发首请求
   },
 
   onLaunch: function () {
@@ -18,7 +19,9 @@ App({
     // 桌号首次进来落一次盘，之后「我的」页可改，菜单/确认页共用
     this.globalData.tableId = store.getTable();
     if (!api.getToken()) {
-      api.openSession(store.getTable()).catch(function () {
+      // 暴露给 authed()：页面 onLoad 若早于开桌完成，先等这个 Promise，
+      // 避免每次冷启动都在 Console 留两条 401（orders + notifications）。
+      this.globalData.sessionReady = api.openSession(store.getTable()).catch(function () {
         // 页面各自处理网络错误，这里静默即可
       });
     }

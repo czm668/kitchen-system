@@ -3,5 +3,22 @@
 .dish-row {
   display: flex; flex-direction: row; align-items: center;
   padding: 18rpx 0; margin-top: 4rpx;
-  border-top: 1rpx solid #e5e5ea;
+  border-top: 1rpx solid var(--line, #e6dfd0);
+}
+
+/* 订单里的菜品行缩略图：72rpx，只为「一眼认出是哪道菜」，不做主角 */
+.dish-thumb {
+  width: 72rpx; height: 72rpx;
+  flex-shrink: 0;
+  margin-right: 16rpx;
+  border-radius: 8rpx;
+  overflow: hidden;
+  background: var(--panel-2, #f1ebdd);
+}
+.dish-thumb__img { width: 100%; height: 100%; display: block; }
+.dish-thumb__ph {
+  width: 100%; height: 100%;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 22rpx; color: var(--text-3, #988f7f);
+  background: linear-gradient(160deg, #f7f3ea, #ece6da);
 }

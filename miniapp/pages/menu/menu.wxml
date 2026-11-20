@@ -1,8 +1,13 @@
 <import src="../../templates/common.wxml"/>
 
 <view class="page page--bar">
+  <!-- 首屏横幅：门店口吻 + 主推菜品拼贴，图由 tools/menu_assets.py 生成 -->
+  <view class="hero">
+    <image class="hero__img" src="{{banner}}" mode="aspectFill" />
+  </view>
+
   <!-- 搜索 + 分类 -->
-  <view class="search" style="margin: 24rpx 24rpx 8rpx;">
+  <view class="search" style="margin: 20rpx 24rpx 8rpx;">
     <input class="input" value="{{keyword}}" bindinput="onSearch"
            placeholder="搜菜名 / 分类 / 编码" confirm-type="search" />
     <view wx:if="{{keyword}}" class="caption" style="padding: 0 8rpx;" bindtap="clearSearch">清除</view>
@@ -28,30 +33,38 @@
   <template wx:elif="{{visible.length === 0}}" is="state-empty"
             data="{{mark: '·', title: '没有匹配的菜', hint: '换个关键词或分类试试', actionText: '清除筛选'}}"/>
 
-  <!-- 菜品列表 -->
+  <!-- 菜品列表：左图右文，图占 200×150rpx 缩略位 -->
   <view wx:else class="fade-in">
-    <view wx:for="{{visible}}" wx:key="code" class="card card--tap" bindtap="openDetail" data-code="{{item.code}}">
-      <view class="row between">
-        <view class="grow">
-          <view class="row gap-12">
-            <text class="title">{{item.name}}</text>
-            <text wx:if="{{item.sold_out}}" class="badge danger badge--sm">{{item.unavailable_reason || '已沽清'}}</text>
-          </view>
-          <view class="muted" style="margin-top: 8rpx;">
-            {{item.category}} · 参考 {{item.estimate_minutes}} 分钟 · {{item.code}}
-          </view>
-        </view>
-        <view class="price" style="margin-left: 16rpx;">￥{{item.price_text}}</view>
+    <view wx:for="{{visible}}" wx:key="code"
+          class="dish {{item.sold_out ? 'dish--off' : ''}}"
+          bindtap="openDetail" data-code="{{item.code}}">
+      <view class="dish__thumb">
+        <image wx:if="{{item.image}}" class="dish__img" src="{{item.image}}"
+               mode="aspectFill" lazy-load
+               data-code="{{item.code}}" binderror="onImgError" />
+        <view wx:else class="dish__ph">{{item.category}}</view>
+        <view wx:if="{{item.sold_out}}" class="dish__mask">{{soldOutMask}}</view>
+        <view wx:elif="{{item.featured}}" class="dish__flag">主推</view>
       </view>
 
-      <view class="row between" style="margin-top: 20rpx;">
-        <view class="caption">点卡片看详情</view>
-        <view class="stepper" wx:if="{{!item.sold_out}}">
-          <view wx:if="{{item.qty > 0}}" class="stepper__btn" catchtap="minus" data-code="{{item.code}}">－</view>
-          <view wx:if="{{item.qty > 0}}" class="stepper__num">{{item.qty}}</view>
-          <view class="stepper__btn stepper__btn--primary" catchtap="add" data-code="{{item.code}}">＋</view>
+      <view class="dish__main">
+        <view class="row between gap-12">
+          <text class="dish__name">{{item.name}}</text>
+          <text class="dish__price num">￥{{item.price_text}}</text>
         </view>
-        <view wx:else class="badge plain badge--sm">暂不可点</view>
+        <view class="dish__meta">{{item.category}} · 参考 {{item.estimate_minutes}} 分钟</view>
+        <view wx:if="{{item.note}}" class="dish__note">{{item.note}}</view>
+
+        <!-- 这一行只放加购控件。菜品的内部编码（D-QJRS）不给顾客看：
+             它既帮不上点菜，又撑起一行空白，把卡片压得发闷 -->
+        <view class="row" style="margin-top: 14rpx; justify-content: flex-end;">
+          <view class="stepper" wx:if="{{!item.sold_out}}">
+            <view wx:if="{{item.qty > 0}}" class="stepper__btn" catchtap="minus" data-code="{{item.code}}">－</view>
+            <view wx:if="{{item.qty > 0}}" class="stepper__num">{{item.qty}}</view>
+            <view class="stepper__btn stepper__btn--primary" catchtap="add" data-code="{{item.code}}">＋</view>
+          </view>
+          <view wx:else class="badge plain badge--sm">{{item.unavailable_reason || '暂不可点'}}</view>
+        </view>
       </view>
     </view>
   </view>
@@ -69,19 +82,25 @@
 <!-- 菜品详情弹层 -->
 <view wx:if="{{detail}}" class="sheet-mask" bindtap="closeDetail">
   <view class="sheet" catchtap="noop">
+    <view class="sheet__grab"></view>
     <view class="row between">
       <view class="h2">{{detail.name}}</view>
       <view class="caption" bindtap="closeDetail">关闭</view>
     </view>
+    <!-- aspectFit 而不是 aspectFill：4:3 的图塞进 2.3:1 的框会被裁掉上下 45%，
+         盘子和热气正好是上下边缘，一裁就只剩中间一坨菜。留白比裁图好看。 -->
+    <image wx:if="{{detail.image}}" class="sheet__img" src="{{detail.image}}" mode="aspectFit" />
     <view class="divider"></view>
     <view class="kv"><text class="kv__k">价格</text><text class="kv__v price">￥{{detail.price_text}}</text></view>
     <view class="kv"><text class="kv__k">分类</text><text class="kv__v">{{detail.category}}</text></view>
     <view class="kv"><text class="kv__k">参考制作时长</text><text class="kv__v num">{{detail.estimate_minutes}} 分钟</text></view>
+    <view class="kv" wx:if="{{detail.note}}"><text class="kv__k">主料</text><text class="kv__v">{{detail.note}}</text></view>
     <view class="kv"><text class="kv__k">菜品编码</text><text class="kv__v">{{detail.code}}</text></view>
     <view class="kv"><text class="kv__k">状态</text>
       <text class="kv__v">{{detail.sold_out ? '已沽清' : '可点'}}</text></view>
     <view class="card card--flat" style="margin: 20rpx 0;">
       <view class="caption">这道菜的配料与工序由后厨在管理端按配方版本维护；下单时会锁定当时的版本，已在制作的订单不受后续改动影响。</view>
+      <view class="caption" style="margin-top: 8rpx;">菜品图为示意（非实拍），份量与摆盘以实际出餐为准。</view>
     </view>
     <view class="btn {{detail.sold_out ? 'disabled' : ''}} btn--block" bindtap="addFromDetail">
       {{detail.sold_out ? '已沽清' : '加入购物车'}}

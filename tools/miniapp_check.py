@@ -22,6 +22,7 @@
 """
 from __future__ import annotations
 
+import json
 import re
 import sys
 from pathlib import Path
@@ -248,9 +249,79 @@ def check_contract(report: Report) -> None:
                  "; ".join(leaked) if leaked else "全部在 /api/customer/ 下")
 
 
-# --------------------------------------------------------------------- 4 冒烟
+# --------------------------------------------------------------------- 4 视觉
+#: A9–A23 的冷色板。A25 统一改暖后，任何一处残留都会让某个页面看起来还是旧 UI，
+#: 所以这里按色值卡死，而不是靠答辩前肉眼过一遍、过完又忘。
+LEGACY_COLORS = ("#0071e3", "#0a84ff", "#f5f5f7", "#f2f2f7", "#8e8e93", "#e5e5ea")
+TOKEN_NAMES = ("--bg", "--panel", "--panel-2", "--text", "--text-2", "--text-3",
+               "--line", "--accent", "--price", "--info", "--green", "--orange", "--red")
+
+
+def check_visual(report: Report) -> None:
+    print("\n[4] 视觉一致性（设计令牌 / tabBar 图标 / 图与菜对应）")
+    miniapp = ROOT / "miniapp"
+    app_wxss = (miniapp / "app.wxss").read_text(encoding="utf-8")
+    block = re.search(r"page\s*\{(.*?)\n\}", app_wxss, re.S)
+    scope = block.group(1) if block else ""
+
+    # 1) 令牌集中定义在 page 块，且必须是裸值。
+    #    --x: var(--x, #hex) 是自引用，变量会整体失效——批量换色最容易踩这个坑。
+    missing = [t for t in TOKEN_NAMES if not re.search(rf"{re.escape(t)}:\s*#", scope)]
+    report.check(not missing, "设计令牌集中在 app.wxss 的 page 块",
+                 f"缺 {', '.join(missing)}" if missing else f"{len(TOKEN_NAMES)} 个")
+    loops = re.findall(r"(--[\w-]+):\s*var\(\1", app_wxss)
+    report.check(not loops, "令牌定义无自引用", "; ".join(loops) if loops else "ok")
+
+    # 2) 旧冷色板不许残留在任何 wxss 里
+    hits = []
+    for path in miniapp.rglob("*.wxss"):
+        text = path.read_text(encoding="utf-8").lower()
+        for color in LEGACY_COLORS:
+            if color in text:
+                hits.append(f"{path.relative_to(miniapp)}:{color}")
+    report.check(not hits, "无旧冷色板残留",
+                 f"{len(hits)} 处：{'; '.join(hits[:4])}" if hits else "全部走变量")
+
+    # 3) tabBar 图标齐全且在包内；选中色与主题主色同源
+    cfg = json.loads((miniapp / "app.json").read_text(encoding="utf-8"))
+    tabs = cfg.get("tabBar", {}).get("list", [])
+    declared = all(t.get("iconPath") and t.get("selectedIconPath") for t in tabs)
+    on_disk = all((miniapp / t[k]).is_file() for t in tabs
+                  for k in ("iconPath", "selectedIconPath") if t.get(k))
+    report.check(declared and on_disk, "tabBar 四个 tab 都有图标且在包内",
+                 f"{len(tabs)} 个 tab")
+    accent = re.search(r"--accent:\s*(#[0-9a-fA-F]{6})", scope)
+    selected = str(cfg.get("tabBar", {}).get("selectedColor", ""))
+    report.check(bool(accent) and accent.group(1).lower() == selected.lower(),
+                 "tabBar 选中色与 --accent 同源", selected)
+
+    # 4) 图与菜一一对应：新增菜品忘了跑生成器，卡片会静默退化成色块，不会报错
+    mapping = (miniapp / "utils" / "dish_images.js").read_text(encoding="utf-8")
+    # 生成的映射用双引号（JSON 风格），这里两种引号都吃
+    mapped = set(re.findall(r"[\"'](D-[A-Z]+)[\"']", mapping))
+    seed = (ROOT / "fixtures" / "seed_kitchen.sql").read_text(encoding="utf-8")
+    seeded = set(re.findall(r"'(D-[A-Z]+)'", seed))
+    lack, extra = sorted(seeded - mapped), sorted(mapped - seeded)
+    detail = f"缺 {', '.join(lack)}" if lack else f"{len(mapped)} 道菜全部有图"
+    if extra:
+        detail += f"；多余 {', '.join(extra)}（seed 已删的菜，可直接删图省包体）"
+    report.check(not lack, "菜单每道菜都有主图", detail)
+
+    # 5) 溯源标签图不能把 HTTP 地址直接绑给 <image>。
+    #    基础库 3.18.0 起组件层拒 http（关掉域名检查也没用），必须落本地临时文件。
+    trace_wxml = (miniapp / "pages" / "trace" / "trace.wxml").read_text(encoding="utf-8")
+    bound = re.findall(r"<image[^>]*src=\"([^\"]+)\"", trace_wxml)
+    direct = [s for s in bound if "labelUrl" in s]
+    trace_js = (miniapp / "pages" / "trace" / "trace.js").read_text(encoding="utf-8")
+    landed = "writeFile" in trace_js and "responseType: 'arraybuffer'" in trace_js
+    report.check(not direct and landed, "溯源标签图走本地临时文件而非远程 HTTP",
+                 "仍直绑 labelUrl" if direct else
+                 ("arraybuffer→writeFile" if landed else "缺少落盘逻辑"))
+
+
+# --------------------------------------------------------------------- 5 冒烟
 def check_smoke(report: Report) -> bool:
-    print("\n[4] 顾客全链路冒烟（Router 直调 + 真 HTTP PNG）")
+    print("\n[5] 顾客全链路冒烟（Router 直调 + 真 HTTP PNG）")
     import tempfile
     import urllib.request
 
@@ -374,6 +445,7 @@ def main() -> int:
     check_files(report)
     check_pages(report)
     check_contract(report)
+    check_visual(report)
     check_smoke(report)
     code = report.summary()
 

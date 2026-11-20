@@ -4,6 +4,24 @@
   display: flex; flex-direction: row; align-items: center;
   padding: 22rpx 0;
 }
-.cart-row + .cart-row { border-top: 1rpx solid #e5e5ea; }
+.cart-row + .cart-row { border-top: 1rpx solid var(--line, #e6dfd0); }
 .cart-row:first-child { padding-top: 0; }
 .cart-row:last-child { padding-bottom: 0; }
+
+/* 购物车行首图：96rpx 方图。结算页要「认出自己点了什么」，图比字快。 */
+.cart-thumb {
+  width: 96rpx; height: 96rpx;
+  flex-shrink: 0;
+  margin-right: 20rpx;
+  border-radius: 10rpx;
+  overflow: hidden;
+  background: var(--panel-2, #f1ebdd);
+}
+.cart-thumb__img { width: 100%; height: 100%; display: block; }
+/* 无图/图挂：退回品类色块，不出现破图 */
+.cart-thumb__ph {
+  width: 100%; height: 100%;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 22rpx; color: var(--text-3, #988f7f);
+  background: linear-gradient(160deg, #f7f3ea, #ece6da);
+}

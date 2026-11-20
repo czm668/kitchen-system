@@ -11,6 +11,7 @@
       <view class="bubble {{item.role}}">
         <view class="bubble-text">{{item.text}}</view>
         <view wx:if="{{item.kind}}" class="bubble-kind">{{item.kind}}</view>
+        <view wx:if="{{item.handoffNote}}" class="bubble-handoff {{item.handoffLevel}}">{{item.handoffNote}}</view>
         <view wx:if="{{item.ticket}}" class="bubble-ticket">工单 {{item.ticket}}</view>
       </view>
     </view>
